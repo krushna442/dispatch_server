@@ -15,6 +15,7 @@ import gatepassRoutes from './routes/gatepassRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
 
 const app = express();
+app.set('trust proxy', 1);
 const httpServer = http.createServer(app);
 
 const ALLOWED_ORIGINS = [
@@ -22,12 +23,24 @@ const ALLOWED_ORIGINS = [
   'http://localhost:3000',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:3000',
-  'https://dispatch-server-wcdx.onrender.com'
-];
+  'https://dispatch-server-wcdx.onrender.com',
+  process.env.CLIENT_URL,
+  process.env.FRONTEND_URL
+].filter(Boolean);
 
 const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin || ALLOWED_ORIGINS.includes(origin) || origin.startsWith('http://192.168.') || origin.startsWith('http://10.')) {
+    if (
+      !origin ||
+      ALLOWED_ORIGINS.includes(origin) ||
+      origin.startsWith('http://localhost:') ||
+      origin.startsWith('http://127.0.0.1:') ||
+      origin.startsWith('http://192.168.') ||
+      origin.startsWith('http://10.') ||
+      origin.endsWith('.vercel.app') ||
+      origin.endsWith('.netlify.app') ||
+      origin.endsWith('.onrender.com')
+    ) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));

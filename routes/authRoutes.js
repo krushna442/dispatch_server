@@ -27,10 +27,12 @@ router.post('/login', async (req, res) => {
       expiresIn: '30d'
     });
 
+    const isProduction = process.env.NODE_ENV === 'production' || req.secure || req.headers['x-forwarded-proto'] === 'https';
+
     res.cookie('token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
       maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
     });
 
@@ -45,8 +47,11 @@ router.post('/login', async (req, res) => {
 });
 
 router.post('/logout', (req, res) => {
+  const isProduction = process.env.NODE_ENV === 'production' || req.secure || req.headers['x-forwarded-proto'] === 'https';
   res.cookie('token', '', {
     httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
     expires: new Date(0)
   });
   res.json({ message: 'Logged out successfully' });
