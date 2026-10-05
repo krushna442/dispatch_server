@@ -4,13 +4,9 @@ import { protectRoute, adminOnly } from '../middleware/auth.js';
 
 const router = express.Router();
 router.use(protectRoute);
-router.use(adminOnly);
 
 router.get('/summary', async (req, res) => {
   try {
-    const isAdmin = req.user.role === 'admin';
-    const userIdFilter = isAdmin ? '' : `AND user_id = ${req.user.id}`;
-    
     const today = new Date().toISOString().split('T')[0];
 
     const plansStats = await queryOne(`
@@ -18,14 +14,14 @@ router.get('/summary', async (req, res) => {
         COUNT(*) as total_plans,
         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_plans,
         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_plans
-      FROM despatch_plans WHERE 1=1 ${userIdFilter}
+      FROM despatch_plans WHERE 1=1
     `);
 
     const scanStats = await queryOne(`
       SELECT 
         COUNT(*) as total_scans,
         SUM(CASE WHEN DATE(scan_date) = '${today}' THEN 1 ELSE 0 END) as today_scans
-      FROM scan_logs WHERE 1=1 ${userIdFilter}
+      FROM scan_logs WHERE 1=1
     `);
 
     const total = Number(plansStats.total_plans || 0);
