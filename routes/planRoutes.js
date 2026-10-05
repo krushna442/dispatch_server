@@ -16,7 +16,7 @@ router.get('/', async (req, res) => {
     
     if (isToday) {
       // Include today's plans + pending carryovers
-      sql += ' AND (plan_date = ? OR (plan_date < ? AND status = "pending" AND balance_quantity > 0))';
+      sql += " AND (plan_date = ? OR (plan_date < ? AND status = 'pending' AND balance_quantity > 0))";
       params.push(dateFilter, dateFilter);
     } else {
       sql += ' AND plan_date = ?';
@@ -57,7 +57,7 @@ router.post('/import', authorizeRoles('admin', 'sales'), async (req, res) => {
         );
       } else {
         await execute(
-          'INSERT INTO despatch_plans (user_id, part_number, quantity, balance_quantity, scanned_quantity, status, plan_date) VALUES (?, ?, ?, ?, 0, "pending", ?)',
+          "INSERT INTO despatch_plans (user_id, part_number, quantity, balance_quantity, scanned_quantity, status, plan_date) VALUES (?, ?, ?, ?, 0, 'pending', ?)",
           [targetUserId, part_number, quantity, quantity, today]
         );
       }
@@ -78,7 +78,7 @@ router.post('/', authorizeRoles('admin', 'sales'), async (req, res) => {
     const date = plan_date || new Date().toISOString().split('T')[0];
     
     await execute(
-      'INSERT INTO despatch_plans (user_id, part_number, quantity, balance_quantity, scanned_quantity, status, plan_date) VALUES (?, ?, ?, ?, 0, "pending", ?)',
+      "INSERT INTO despatch_plans (user_id, part_number, quantity, balance_quantity, scanned_quantity, status, plan_date) VALUES (?, ?, ?, ?, 0, 'pending', ?)",
       [targetUserId, part_number, quantity, quantity, date]
     );
     

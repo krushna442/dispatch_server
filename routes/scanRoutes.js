@@ -32,7 +32,7 @@ router.post('/', async (req, res) => {
     }
 
     const plan = await queryOne(
-      'SELECT * FROM despatch_plans WHERE part_number = ? AND balance_quantity > 0 AND status = "pending" ORDER BY plan_date ASC LIMIT 1',
+      "SELECT * FROM despatch_plans WHERE part_number = ? AND balance_quantity > 0 AND status = 'pending' ORDER BY plan_date ASC LIMIT 1",
       [partNo]
     );
 

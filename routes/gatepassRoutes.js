@@ -14,7 +14,7 @@ router.post('/', async (req, res) => {
   let connection;
   try {
     const plans = await query(
-      'SELECT * FROM despatch_plans WHERE status = "completed" AND gate_pass_number IS NULL'
+      "SELECT * FROM despatch_plans WHERE status = 'completed' AND gate_pass_number IS NULL"
     );
 
     if (plans.length === 0) {
@@ -54,7 +54,7 @@ router.post('/', async (req, res) => {
     // Send tabular email to users opted-in to receive despatch mails
     try {
       const emailUsers = await query(
-        'SELECT email FROM users WHERE receive_despatch_mail = 1 AND is_active = 1 AND email IS NOT NULL AND TRIM(email) != ""'
+        "SELECT email FROM users WHERE receive_despatch_mail = 1 AND is_active = 1 AND email IS NOT NULL AND TRIM(email) != ''"
       );
       const recipientEmails = emailUsers.map(u => u.email.trim()).filter(Boolean);
 
