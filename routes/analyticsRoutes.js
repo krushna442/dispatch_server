@@ -21,7 +21,7 @@ router.get('/summary', async (req, res) => {
       SELECT 
         COUNT(*) as total_scans,
         SUM(CASE WHEN DATE(scan_date) = '${today}' THEN 1 ELSE 0 END) as today_scans
-      FROM scan_logs WHERE 1=1
+      FROM scan_logs WHERE (status IS NULL OR status = 'success')
     `);
 
     const total = Number(plansStats.total_plans || 0);
@@ -50,7 +50,7 @@ router.get('/daily', async (req, res) => {
     const stats = await query(`
       SELECT DATE(scan_date) as date, COUNT(*) as count 
       FROM scan_logs 
-      WHERE scan_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) ${userIdFilter}
+      WHERE scan_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) AND (status IS NULL OR status = 'success') ${userIdFilter}
       GROUP BY DATE(scan_date)
       ORDER BY date ASC
     `);
@@ -69,7 +69,7 @@ router.get('/users', adminOnly, async (req, res) => {
         u.id, u.name, u.username,
         (SELECT COUNT(*) FROM despatch_plans WHERE user_id = u.id) as total_plans,
         (SELECT COUNT(*) FROM despatch_plans WHERE user_id = u.id AND status = 'completed') as completed_plans,
-        (SELECT COUNT(*) FROM scan_logs WHERE user_id = u.id) as scans,
+        (SELECT COUNT(*) FROM scan_logs WHERE user_id = u.id AND (status IS NULL OR status = 'success')) as scans,
         (SELECT MAX(scan_date) FROM scan_logs WHERE user_id = u.id) as last_active
       FROM users u
       ORDER BY scans DESC
@@ -90,7 +90,7 @@ router.get('/parts', async (req, res) => {
     const stats = await query(`
       SELECT part_number, COUNT(*) as scan_count 
       FROM scan_logs 
-      WHERE 1=1 ${userIdFilter}
+      WHERE (status IS NULL OR status = 'success') ${userIdFilter}
       GROUP BY part_number
       ORDER BY scan_count DESC
       LIMIT 20

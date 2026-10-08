@@ -105,6 +105,24 @@ async function bootstrap() {
       // Column may already exist
     }
 
+    try {
+      await execute(`ALTER TABLE scan_logs ADD COLUMN status VARCHAR(50) DEFAULT 'success'`);
+    } catch (err) {
+      // Column may already exist
+    }
+
+    try {
+      await execute(`ALTER TABLE scan_logs ADD COLUMN remark VARCHAR(255) DEFAULT NULL`);
+    } catch (err) {
+      // Column may already exist
+    }
+
+    try {
+      await execute(`ALTER TABLE scan_logs MODIFY COLUMN plan_id INT NULL`);
+    } catch (err) {
+      // Column modification ignore
+    }
+
     await execute(`
       CREATE TABLE IF NOT EXISTS despatch_plans (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -128,7 +146,7 @@ async function bootstrap() {
       CREATE TABLE IF NOT EXISTS scan_logs (
         id INT AUTO_INCREMENT PRIMARY KEY,
         user_id INT NOT NULL,
-        plan_id INT NOT NULL,
+        plan_id INT NULL,
         part_number VARCHAR(255) NOT NULL,
         vendor_code VARCHAR(100),
         serial_number VARCHAR(255) NOT NULL,
@@ -138,7 +156,9 @@ async function bootstrap() {
         rev_no VARCHAR(50),
         format VARCHAR(50),
         raw_scan_text TEXT,
-        unique_key VARCHAR(200) UNIQUE NOT NULL,
+        unique_key VARCHAR(200) NOT NULL,
+        status VARCHAR(50) DEFAULT 'success',
+        remark VARCHAR(255) DEFAULT NULL,
         scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id),
         FOREIGN KEY (plan_id) REFERENCES despatch_plans(id)

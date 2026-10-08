@@ -26,9 +26,62 @@ router.post('/', async (req, res) => {
 
     const unique_key = `${partSlNo}_${dispatchDate || 'ND'}`;
 
-    const existingScan = await queryOne('SELECT id FROM scan_logs WHERE unique_key = ?', [unique_key]);
+    // Check if this part has already been successfully scanned
+    const existingScan = await queryOne(
+      "SELECT id, plan_id FROM scan_logs WHERE unique_key = ? AND (status IS NULL OR status = 'success')",
+      [unique_key]
+    );
+
     if (existingScan) {
-      return res.status(400).json({ message: 'Duplicate scan detected' });
+      // Record duplicate scan attempt with status 'reject' and remark 'duplicate scan'
+      const scanDateObj = new Date();
+      const scanMonth = scanDateObj.getMonth() + 1;
+      const scanYear = scanDateObj.getFullYear();
+      const rejectUniqueKey = `${unique_key}_REJECT_${Date.now()}`;
+
+      try {
+        await execute(
+          `INSERT INTO scan_logs 
+           (user_id, plan_id, part_number, vendor_code, serial_number, scan_date, scan_month, scan_year, rev_no, format, raw_scan_text, unique_key, status, remark)
+           VALUES (?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, 'reject', 'duplicate scan')`,
+          [
+            req.user.id,
+            existingScan.plan_id || null,
+            partNo,
+            vendorCode,
+            partSlNo,
+            scanMonth,
+            scanYear,
+            revNo,
+            format,
+            raw_scan_text,
+            rejectUniqueKey
+          ]
+        );
+      } catch (insertErr) {
+        console.error('Error recording rejected scan:', insertErr);
+      }
+
+      const rejectDetails = {
+        partNo,
+        vendorCode,
+        partSlNo,
+        plan_id: existingScan.plan_id,
+        status: 'reject',
+        remark: 'duplicate scan',
+        user_id: req.user.id,
+        username: req.user.username,
+        user_name: req.user.name,
+        scanned_at: scanDateObj
+      };
+      emitToAll('despatch:scan', rejectDetails);
+
+      return res.status(400).json({
+        message: 'Duplicate scan detected',
+        status: 'reject',
+        remark: 'duplicate scan',
+        user: req.user.username
+      });
     }
 
     const plan = await queryOne(
@@ -49,8 +102,8 @@ router.post('/', async (req, res) => {
 
     await connection.execute(
       `INSERT INTO scan_logs 
-       (user_id, plan_id, part_number, vendor_code, serial_number, scan_date, scan_month, scan_year, rev_no, format, raw_scan_text, unique_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (user_id, plan_id, part_number, vendor_code, serial_number, scan_date, scan_month, scan_year, rev_no, format, raw_scan_text, unique_key, status, remark)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'success', 'verified')`,
       [req.user.id, plan.id, partNo, vendorCode, partSlNo, scanDateObj, scanMonth, scanYear, revNo, format, raw_scan_text, unique_key]
     );
 
@@ -65,10 +118,21 @@ router.post('/', async (req, res) => {
     await connection.commit();
     connection.release();
 
-    const scanDetails = { partNo, vendorCode, partSlNo, plan_id: plan.id };
+    const scanDetails = {
+      partNo,
+      vendorCode,
+      partSlNo,
+      plan_id: plan.id,
+      status: 'success',
+      remark: 'verified',
+      user_id: req.user.id,
+      username: req.user.username,
+      user_name: req.user.name,
+      scanned_at: scanDateObj
+    };
     emitToAll('despatch:scan', scanDetails);
 
-    res.json({ message: 'Scan successful', parsed, plan_id: plan.id });
+    res.json({ message: 'Scan successful', parsed, plan_id: plan.id, status: 'success' });
   } catch (error) {
     if (connection) {
       try { await connection.rollback(); connection.release(); } catch(e) {}
@@ -80,25 +144,35 @@ router.post('/', async (req, res) => {
 
 router.get('/logs', async (req, res) => {
   try {
-    let sql = 'SELECT * FROM scan_logs WHERE 1=1';
+    let sql = `
+      SELECT s.*, u.username, u.name as user_name 
+      FROM scan_logs s 
+      LEFT JOIN users u ON s.user_id = u.id 
+      WHERE 1=1
+    `;
     let params = [];
     
     if (req.user.role !== 'admin') {
-      sql += ' AND user_id = ?';
+      sql += ' AND s.user_id = ?';
       params.push(req.user.id);
     }
     
     if (req.query.date) {
-      sql += ' AND DATE(scan_date) = ?';
+      sql += ' AND DATE(s.scan_date) = ?';
       params.push(req.query.date);
     }
     
     if (req.query.part_number) {
-      sql += ' AND part_number = ?';
+      sql += ' AND s.part_number = ?';
       params.push(req.query.part_number);
     }
+
+    if (req.query.status) {
+      sql += ' AND s.status = ?';
+      params.push(req.query.status);
+    }
     
-    sql += ' ORDER BY scanned_at DESC LIMIT 1000';
+    sql += ' ORDER BY s.scanned_at DESC LIMIT 1000';
     
     const logs = await query(sql, params);
     res.json(logs);
@@ -110,13 +184,25 @@ router.get('/logs', async (req, res) => {
 
 router.get('/export', async (req, res) => {
   try {
-    let sql = 'SELECT s.*, u.username, u.name FROM scan_logs s JOIN users u ON s.user_id = u.id WHERE 1=1';
+    let sql = `
+      SELECT s.*, u.username, u.name as user_name 
+      FROM scan_logs s 
+      LEFT JOIN users u ON s.user_id = u.id 
+      WHERE 1=1
+    `;
     let params = [];
     
     if (req.user.role !== 'admin') {
       sql += ' AND s.user_id = ?';
       params.push(req.user.id);
     }
+
+    if (req.query.date) {
+      sql += ' AND DATE(s.scan_date) = ?';
+      params.push(req.query.date);
+    }
+    
+    sql += ' ORDER BY s.scanned_at DESC';
     
     const logs = await query(sql, params);
     res.json(logs);
