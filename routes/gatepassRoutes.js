@@ -85,41 +85,94 @@ router.post('/', async (req, res) => {
           console.error('[GatePass] Error fetching scan logs for Excel attachment:', fetchScanErr);
         }
 
-        // Build Excel Workbook: Sheet 1 = Scanned_Labels, Sheet 2 = Gate_Pass_Summary
-        const scanRows = scanLogs.map((s, idx) => ({
-          'SR No': idx + 1,
-          'Scanned Label (Barcode Text)': s.scanned_label || s.raw_scan_text || s.serial_number || '—',
-          'Part Number': s.part_number,
-          'Serial Number': s.serial_number,
-          'Vendor Code': s.vendor_code || '—',
-          'Scanned By': s.username ? `@${s.username} (${s.user_name || ''})` : (s.user_id ? `User #${s.user_id}` : '—'),
-          'Status': (s.status || 'success').toUpperCase(),
-          'Remark': s.remark || (s.status === 'reject' ? 'duplicate scan' : 'verified'),
-          'Scan Date & Time': s.scanned_at ? new Date(s.scanned_at).toLocaleString('en-GB') : ''
-        }));
-
-        if (scanRows.length === 0) {
-          scanRows.push({
-            'SR No': 1,
-            'Scanned Label (Barcode Text)': 'No scans recorded',
-            'Part Number': '—',
-            'Serial Number': '—',
-            'Vendor Code': '—',
-            'Scanned By': '—',
-            'Status': '—',
-            'Remark': '—',
-            'Scan Date & Time': '—'
-          });
+        // Group scans by part_number
+        const scansByPart = new Map();
+        for (const s of scanLogs) {
+          const pNo = (s.part_number || '').trim().toUpperCase();
+          if (!scansByPart.has(pNo)) scansByPart.set(pNo, []);
+          scansByPart.get(pNo).push(s);
         }
 
-        const wsScans = XLSX.utils.json_to_sheet(scanRows);
-        const scanCols = Object.keys(scanRows[0] || {}).length;
+        // Build Excel Sheet 1: Scanned_Labels with grouped/merged Part Number & SR No
+        const headers = [
+          'SR No',
+          'Part Number',
+          'Scanned Label (Barcode Text)',
+          'Serial Number',
+          'Vendor Code',
+          'Scanned By',
+          'Status',
+          'Remark',
+          'Scan Date & Time'
+        ];
 
-        // Set column widths for readability
+        const rows = [headers];
+        const merges = [];
+        const redRows = new Set();
+
+        let currentSrNo = 1;
+        let currentRowIdx = 1;
+
+        // Process plans in order
+        const processedParts = new Set();
+        for (const plan of plans) {
+          const pNo = (plan.part_number || '').trim().toUpperCase();
+          if (processedParts.has(pNo)) continue;
+          processedParts.add(pNo);
+
+          const partScans = scansByPart.get(pNo) || [];
+          const count = partScans.length;
+
+          if (count === 0) {
+            rows.push([currentSrNo, pNo, 'No scans recorded', '—', '—', '—', '—', '—', '—']);
+            currentRowIdx++;
+            currentSrNo++;
+          } else {
+            const startRow = currentRowIdx;
+            const endRow = startRow + count - 1;
+
+            if (count > 1) {
+              merges.push({ s: { r: startRow, c: 0 }, e: { r: endRow, c: 0 } });
+              merges.push({ s: { r: startRow, c: 1 }, e: { r: endRow, c: 1 } });
+            }
+
+            partScans.forEach((s, idx) => {
+              const isDup = s.status === 'reject' || (s.remark && s.remark.toLowerCase().includes('duplicate'));
+              const rIdx = startRow + idx;
+              if (isDup) redRows.add(rIdx);
+
+              const label = s.scanned_label || s.raw_scan_text || s.serial_number || '—';
+              const serial = s.serial_number || '—';
+              const vendor = s.vendor_code || '—';
+              const scannedBy = s.username ? `@${s.username} (${s.user_name || ''})` : (s.user_id ? `User #${s.user_id}` : '—');
+              const status = (s.status || 'success').toUpperCase();
+              const remark = s.remark || (s.status === 'reject' ? 'duplicate scan' : 'verified');
+              const time = s.scanned_at ? new Date(s.scanned_at).toLocaleString('en-GB') : '—';
+
+              rows.push([
+                idx === 0 ? currentSrNo : '',
+                idx === 0 ? pNo : '',
+                label,
+                serial,
+                vendor,
+                scannedBy,
+                status,
+                remark,
+                time
+              ]);
+              currentRowIdx++;
+            });
+
+            currentSrNo++;
+          }
+        }
+
+        const wsScans = XLSX.utils.aoa_to_sheet(rows);
+        wsScans['!merges'] = merges;
         wsScans['!cols'] = [
           { wch: 8 },  // SR No
-          { wch: 38 }, // Scanned Label
-          { wch: 18 }, // Part Number
+          { wch: 20 }, // Part Number
+          { wch: 42 }, // Scanned Label
           { wch: 18 }, // Serial Number
           { wch: 14 }, // Vendor Code
           { wch: 24 }, // Scanned By
@@ -128,39 +181,70 @@ router.post('/', async (req, res) => {
           { wch: 22 }, // Scan Date & Time
         ];
 
-        // Header style (Dark teal fill with bold white text)
-        for (let c = 0; c < scanCols; c++) {
+        // Header styles
+        for (let c = 0; c < headers.length; c++) {
           const addr = XLSX.utils.encode_cell({ r: 0, c });
           if (wsScans[addr]) {
             wsScans[addr].s = {
               fill: { fgColor: { rgb: '0F766E' } },
-              font: { color: { rgb: 'FFFFFF' }, bold: true },
+              font: { color: { rgb: 'FFFFFF' }, bold: true, sz: 11 },
               alignment: { horizontal: 'center', vertical: 'center' },
+              border: {
+                top: { style: 'thin', color: { rgb: '0D9488' } },
+                bottom: { style: 'thin', color: { rgb: '0D9488' } },
+                left: { style: 'thin', color: { rgb: '0D9488' } },
+                right: { style: 'thin', color: { rgb: '0D9488' } },
+              }
             };
           }
         }
 
-        // Highlight duplicate / reject scans with RED BACKGROUND
-        scanRows.forEach((row, rIdx) => {
-          const isDup = row.Status === 'REJECT' || row.Remark?.toLowerCase().includes('duplicate');
-          if (isDup) {
-            for (let c = 0; c < scanCols; c++) {
-              const addr = XLSX.utils.encode_cell({ r: rIdx + 1, c });
-              if (wsScans[addr]) {
-                wsScans[addr].s = {
-                  fill: { fgColor: { rgb: 'FFC7CE' } }, // Soft red fill
-                  font: { color: { rgb: '9C0006' }, bold: true }, // Dark red bold text
-                  border: {
-                    top: { style: 'thin', color: { rgb: 'E0B4B4' } },
-                    bottom: { style: 'thin', color: { rgb: 'E0B4B4' } },
-                    left: { style: 'thin', color: { rgb: 'E0B4B4' } },
-                    right: { style: 'thin', color: { rgb: 'E0B4B4' } },
-                  },
-                };
-              }
+        // Row styles: merged SR No and Part Number centered bold; duplicate scans soft red
+        for (let r = 1; r < rows.length; r++) {
+          const isDup = redRows.has(r);
+          for (let c = 0; c < headers.length; c++) {
+            const addr = XLSX.utils.encode_cell({ r, c });
+            if (!wsScans[addr]) {
+              wsScans[addr] = { t: 's', v: '' };
+            }
+
+            if (c === 0 || c === 1) {
+              wsScans[addr].s = {
+                font: { bold: true, color: { rgb: '0F172A' }, sz: 11 },
+                alignment: { horizontal: 'center', vertical: 'center' },
+                border: {
+                  top: { style: 'thin', color: { rgb: 'CBD5E1' } },
+                  bottom: { style: 'thin', color: { rgb: 'CBD5E1' } },
+                  left: { style: 'thin', color: { rgb: 'CBD5E1' } },
+                  right: { style: 'thin', color: { rgb: 'CBD5E1' } },
+                }
+              };
+            } else if (isDup) {
+              wsScans[addr].s = {
+                fill: { fgColor: { rgb: 'FFC7CE' } }, // Soft red fill
+                font: { color: { rgb: '9C0006' }, bold: true, sz: 10 }, // Dark red bold text
+                alignment: { vertical: 'center', horizontal: c === 2 ? 'left' : 'center' },
+                border: {
+                  top: { style: 'thin', color: { rgb: 'E0B4B4' } },
+                  bottom: { style: 'thin', color: { rgb: 'E0B4B4' } },
+                  left: { style: 'thin', color: { rgb: 'E0B4B4' } },
+                  right: { style: 'thin', color: { rgb: 'E0B4B4' } },
+                }
+              };
+            } else {
+              wsScans[addr].s = {
+                font: { color: { rgb: '334155' }, sz: 10 },
+                alignment: { vertical: 'center', horizontal: c === 2 ? 'left' : 'center' },
+                border: {
+                  top: { style: 'thin', color: { rgb: 'F1F5F9' } },
+                  bottom: { style: 'thin', color: { rgb: 'F1F5F9' } },
+                  left: { style: 'thin', color: { rgb: 'F1F5F9' } },
+                  right: { style: 'thin', color: { rgb: 'F1F5F9' } },
+                }
+              };
             }
           }
-        });
+        }
 
         // Sheet 2: Gate_Pass_Summary
         const summaryRows = plans.map((p, idx) => ({
@@ -211,16 +295,52 @@ router.post('/', async (req, res) => {
         XLSX.utils.book_append_sheet(wb, wsSummary, 'Gate_Pass_Summary');
         const excelBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
-        const rowsHtml = plans.map((p, idx) => `
-          <tr style="border-bottom: 1px solid #e2e8f0;">
-            <td style="padding: 10px 14px; text-align: center; color: #64748b; font-size: 13px;">${idx + 1}</td>
-            <td style="padding: 10px 14px; font-weight: 600; color: #0f172a; font-family: monospace; font-size: 14px;">${p.part_number}</td>
-            <td style="padding: 10px 14px; text-align: right; font-weight: 700; color: #0f172a; font-size: 14px;">${p.quantity}</td>
-          </tr>
-        `).join('');
+        // Build Email HTML table with merged/rowspan SR No & Part Number
+        let scanTableRowsHtml = '';
+        let emailSrNo = 1;
+
+        for (const plan of plans) {
+          const pNo = (plan.part_number || '').trim().toUpperCase();
+          const partScans = scansByPart.get(pNo) || [];
+
+          if (partScans.length === 0) {
+            scanTableRowsHtml += `
+              <tr style="border-bottom: 1px solid #e2e8f0;">
+                <td style="padding: 10px; text-align: center; vertical-align: middle; font-weight: bold; border: 1px solid #cbd5e1; color: #0f172a;">${emailSrNo}</td>
+                <td style="padding: 10px; text-align: center; vertical-align: middle; font-weight: bold; font-family: monospace; font-size: 14px; border: 1px solid #cbd5e1; color: #0f172a;">${pNo}</td>
+                <td style="padding: 10px; border: 1px solid #cbd5e1; color: #94a3b8; font-style: italic;">No scans recorded</td>
+                <td style="padding: 10px; text-align: center; border: 1px solid #cbd5e1; color: #94a3b8;">—</td>
+              </tr>
+            `;
+            emailSrNo++;
+          } else {
+            const rowCount = partScans.length;
+            partScans.forEach((s, sIdx) => {
+              const isDup = s.status === 'reject' || (s.remark && s.remark.toLowerCase().includes('duplicate'));
+              const bgStyle = isDup ? 'background-color: #fee2e2; color: #991b1b; font-weight: bold;' : 'background-color: #ffffff; color: #1e293b;';
+              const borderStyle = isDup ? 'border: 1px solid #fca5a5;' : 'border: 1px solid #e2e8f0;';
+              const labelText = s.scanned_label || s.raw_scan_text || s.serial_number || '—';
+              const statusText = isDup ? 'REJECT (duplicate)' : 'VERIFIED';
+
+              scanTableRowsHtml += '<tr style="' + (isDup ? 'background-color: #fee2e2;' : '') + '">';
+              if (sIdx === 0) {
+                scanTableRowsHtml += `
+                  <td rowspan="${rowCount}" style="padding: 12px 10px; text-align: center; vertical-align: middle; font-weight: bold; font-size: 14px; border: 1px solid #cbd5e1; background-color: #f8fafc; color: #0f172a;">${emailSrNo}</td>
+                  <td rowspan="${rowCount}" style="padding: 12px 14px; text-align: center; vertical-align: middle; font-weight: bold; font-family: monospace; font-size: 15px; border: 1px solid #cbd5e1; background-color: #f8fafc; color: #0f172a;">${pNo}</td>
+                `;
+              }
+              scanTableRowsHtml += `
+                <td style="padding: 8px 12px; font-family: monospace; font-size: 13px; ${bgStyle} ${borderStyle}">${labelText}</td>
+                <td style="padding: 8px 10px; text-align: center; font-size: 11px; font-weight: 700; ${bgStyle} ${borderStyle}">${statusText}</td>
+              </tr>
+              `;
+            });
+            emailSrNo++;
+          }
+        }
 
         const emailHtml = `
-          <div style="font-family: Arial, sans-serif; max-width: 650px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+          <div style="font-family: Arial, sans-serif; max-width: 750px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
             <div style="background: linear-gradient(135deg, #0d9488 0%, #059669 100%); padding: 20px 24px; color: #ffffff;">
               <h1 style="margin: 0; font-size: 20px; font-weight: 700; letter-spacing: 0.5px;">RSB TRANSMISSIONS (I) LTD.</h1>
               <p style="margin: 4px 0 0 0; font-size: 14px; opacity: 0.9;">Vehicle Despatch Gate Pass Notification</p>
@@ -249,23 +369,20 @@ router.post('/', async (req, res) => {
               </div>
 
               <h3 style="font-size: 15px; color: #1e293b; margin: 0 0 12px 0; border-bottom: 2px solid #0d9488; padding-bottom: 6px;">
-                Despatched Parts Details
+                Scanned Barcode Labels & Verification Audit
               </h3>
 
-              <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px;">
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 13px; border: 1px solid #cbd5e1;">
                 <thead>
-                  <tr style="background-color: #f1f5f9; color: #475569; font-size: 12px; text-transform: uppercase;">
-                    <th style="padding: 10px 14px; text-align: center; border-bottom: 2px solid #cbd5e1; width: 60px;">SR No</th>
-                    <th style="padding: 10px 14px; text-align: left; border-bottom: 2px solid #cbd5e1;">Part Number</th>
-                    <th style="padding: 10px 14px; text-align: right; border-bottom: 2px solid #cbd5e1; width: 120px;">Quantity</th>
+                  <tr style="background-color: #0f766e; color: #ffffff; font-size: 12px; text-transform: uppercase;">
+                    <th style="padding: 10px 12px; text-align: center; border: 1px solid #0d9488; width: 60px;">SR No</th>
+                    <th style="padding: 10px 14px; text-align: center; border: 1px solid #0d9488; width: 150px;">Part Number</th>
+                    <th style="padding: 10px 14px; text-align: left; border: 1px solid #0d9488;">Scanned Label (Barcode Text)</th>
+                    <th style="padding: 10px 12px; text-align: center; border: 1px solid #0d9488; width: 130px;">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  ${rowsHtml}
-                  <tr style="background-color: #f8fafc; font-weight: 700;">
-                    <td colspan="2" style="padding: 12px 14px; text-align: right; border-top: 2px solid #cbd5e1; color: #0f172a;">GRAND TOTAL:</td>
-                    <td style="padding: 12px 14px; text-align: right; border-top: 2px solid #cbd5e1; color: #0d9488; font-size: 15px;">${totalQuantity}</td>
-                  </tr>
+                  ${scanTableRowsHtml}
                 </tbody>
               </table>
 
@@ -274,7 +391,7 @@ router.post('/', async (req, res) => {
                   📎 Excel Sheet Attached: <span style="font-family: monospace;">GatePass_${gate_pass_number}_Scanned_Labels.xlsx</span>
                 </p>
                 <p style="margin: 4px 0 0 0; color: #047857; font-size: 12px;">
-                  The attached spreadsheet includes complete scanned barcode labels, serial numbers, operator timestamps, and verification status. Any duplicate scan attempts are highlighted in red.
+                  The attached spreadsheet groups all parts with merged Part Number cells, individual barcode labels, and highlights duplicate scans in soft red.
                 </p>
               </div>
 
