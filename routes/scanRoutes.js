@@ -42,8 +42,8 @@ router.post('/', async (req, res) => {
       try {
         await execute(
           `INSERT INTO scan_logs 
-           (user_id, plan_id, part_number, vendor_code, serial_number, scan_date, scan_month, scan_year, rev_no, format, raw_scan_text, unique_key, status, remark)
-           VALUES (?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, 'reject', 'duplicate scan')`,
+           (user_id, plan_id, part_number, vendor_code, serial_number, scan_date, scan_month, scan_year, rev_no, format, raw_scan_text, scanned_label, unique_key, status, remark)
+           VALUES (?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, 'reject', 'duplicate scan')`,
           [
             req.user.id,
             existingScan.plan_id || null,
@@ -54,6 +54,7 @@ router.post('/', async (req, res) => {
             scanYear,
             revNo,
             format,
+            raw_scan_text,
             raw_scan_text,
             rejectUniqueKey
           ]
@@ -67,6 +68,8 @@ router.post('/', async (req, res) => {
         vendorCode,
         partSlNo,
         plan_id: existingScan.plan_id,
+        raw_scan_text,
+        scanned_label: raw_scan_text,
         status: 'reject',
         remark: 'duplicate scan',
         user_id: req.user.id,
@@ -80,6 +83,8 @@ router.post('/', async (req, res) => {
         message: 'Duplicate scan detected',
         status: 'reject',
         remark: 'duplicate scan',
+        raw_scan_text,
+        scanned_label: raw_scan_text,
         user: req.user.username
       });
     }
@@ -102,9 +107,9 @@ router.post('/', async (req, res) => {
 
     await connection.execute(
       `INSERT INTO scan_logs 
-       (user_id, plan_id, part_number, vendor_code, serial_number, scan_date, scan_month, scan_year, rev_no, format, raw_scan_text, unique_key, status, remark)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'success', 'verified')`,
-      [req.user.id, plan.id, partNo, vendorCode, partSlNo, scanDateObj, scanMonth, scanYear, revNo, format, raw_scan_text, unique_key]
+       (user_id, plan_id, part_number, vendor_code, serial_number, scan_date, scan_month, scan_year, rev_no, format, raw_scan_text, scanned_label, unique_key, status, remark)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'success', 'verified')`,
+      [req.user.id, plan.id, partNo, vendorCode, partSlNo, scanDateObj, scanMonth, scanYear, revNo, format, raw_scan_text, raw_scan_text, unique_key]
     );
 
     const newBalance = plan.balance_quantity - 1;
@@ -123,6 +128,8 @@ router.post('/', async (req, res) => {
       vendorCode,
       partSlNo,
       plan_id: plan.id,
+      raw_scan_text,
+      scanned_label: raw_scan_text,
       status: 'success',
       remark: 'verified',
       user_id: req.user.id,
@@ -132,7 +139,7 @@ router.post('/', async (req, res) => {
     };
     emitToAll('despatch:scan', scanDetails);
 
-    res.json({ message: 'Scan successful', parsed, plan_id: plan.id, status: 'success' });
+    res.json({ message: 'Scan successful', parsed, plan_id: plan.id, raw_scan_text, scanned_label: raw_scan_text, status: 'success' });
   } catch (error) {
     if (connection) {
       try { await connection.rollback(); connection.release(); } catch(e) {}
@@ -170,6 +177,16 @@ router.get('/logs', async (req, res) => {
     if (req.query.status) {
       sql += ' AND s.status = ?';
       params.push(req.query.status);
+    }
+
+    if (req.query.plan_id) {
+      sql += ' AND s.plan_id = ?';
+      params.push(req.query.plan_id);
+    }
+
+    if (req.query.gate_pass_number) {
+      sql += ' AND s.gate_pass_number = ?';
+      params.push(req.query.gate_pass_number);
     }
     
     sql += ' ORDER BY s.scanned_at DESC LIMIT 1000';

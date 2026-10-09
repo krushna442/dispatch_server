@@ -123,6 +123,30 @@ async function bootstrap() {
       // Column modification ignore
     }
 
+    try {
+      await execute(`ALTER TABLE scan_logs ADD COLUMN scanned_label TEXT`);
+    } catch (err) {
+      // Column may already exist
+    }
+
+    try {
+      await execute(`ALTER TABLE scan_logs ADD COLUMN gate_pass_number VARCHAR(255) DEFAULT NULL`);
+    } catch (err) {
+      // Column may already exist
+    }
+
+    try {
+      await execute(`ALTER TABLE scan_logs ADD COLUMN gate_pass_id INT DEFAULT NULL`);
+    } catch (err) {
+      // Column may already exist
+    }
+
+    try {
+      await execute(`UPDATE scan_logs SET scanned_label = raw_scan_text WHERE scanned_label IS NULL`);
+    } catch (err) {
+      // Backfill ignore
+    }
+
     await execute(`
       CREATE TABLE IF NOT EXISTS despatch_plans (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -156,6 +180,9 @@ async function bootstrap() {
         rev_no VARCHAR(50),
         format VARCHAR(50),
         raw_scan_text TEXT,
+        scanned_label TEXT,
+        gate_pass_number VARCHAR(255) DEFAULT NULL,
+        gate_pass_id INT DEFAULT NULL,
         unique_key VARCHAR(200) NOT NULL,
         status VARCHAR(50) DEFAULT 'success',
         remark VARCHAR(255) DEFAULT NULL,
