@@ -182,7 +182,13 @@ router.get('/logs', async (req, res) => {
       }
     }
     
-    if (req.query.date) {
+    const startDate = req.query.startDate || req.query.fromDate;
+    const endDate = req.query.endDate || req.query.toDate;
+    
+    if (startDate && endDate) {
+      sql += ' AND DATE(s.scan_date) BETWEEN ? AND ?';
+      params.push(startDate, endDate);
+    } else if (req.query.date) {
       sql += ' AND DATE(s.scan_date) = ?';
       params.push(req.query.date);
     }
@@ -240,7 +246,13 @@ router.get('/export', async (req, res) => {
       }
     }
 
-    if (req.query.date) {
+    const startDate = req.query.startDate || req.query.fromDate;
+    const endDate = req.query.endDate || req.query.toDate;
+    
+    if (startDate && endDate) {
+      sql += ' AND DATE(s.scan_date) BETWEEN ? AND ?';
+      params.push(startDate, endDate);
+    } else if (req.query.date) {
       sql += ' AND DATE(s.scan_date) = ?';
       params.push(req.query.date);
     }

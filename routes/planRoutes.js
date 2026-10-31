@@ -8,8 +8,10 @@ router.use(protectRoute);
 
 router.get('/', async (req, res) => {
   try {
-    const dateFilter = req.query.date || new Date().toISOString().split('T')[0];
-    const isToday = dateFilter === new Date().toISOString().split('T')[0];
+    const today = new Date().toISOString().split('T')[0];
+    const startDate = req.query.startDate || req.query.fromDate;
+    const endDate = req.query.endDate || req.query.toDate;
+    const singleDate = req.query.date;
     
     let sql = 'SELECT * FROM despatch_plans WHERE 1=1';
     let params = [];
@@ -19,13 +21,35 @@ router.get('/', async (req, res) => {
       params.push(req.user.customer_name || '', req.user.vendor_code || '', req.user.id);
     }
     
-    if (isToday) {
-      // Include today's plans + pending carryovers
-      sql += " AND (plan_date = ? OR (plan_date < ? AND status = 'pending' AND balance_quantity > 0))";
-      params.push(dateFilter, dateFilter);
+    if (startDate && endDate) {
+      if (startDate === endDate) {
+        if (startDate === today) {
+          sql += " AND (plan_date = ? OR (plan_date < ? AND status = 'pending' AND balance_quantity > 0))";
+          params.push(startDate, startDate);
+        } else {
+          sql += ' AND plan_date = ?';
+          params.push(startDate);
+        }
+      } else {
+        if (endDate >= today) {
+          sql += " AND ((plan_date BETWEEN ? AND ?) OR (plan_date < ? AND status = 'pending' AND balance_quantity > 0))";
+          params.push(startDate, endDate, startDate);
+        } else {
+          sql += ' AND plan_date BETWEEN ? AND ?';
+          params.push(startDate, endDate);
+        }
+      }
     } else {
-      sql += ' AND plan_date = ?';
-      params.push(dateFilter);
+      const dateFilter = singleDate || today;
+      const isToday = dateFilter === today;
+      if (isToday) {
+        // Include today's plans + pending carryovers
+        sql += " AND (plan_date = ? OR (plan_date < ? AND status = 'pending' AND balance_quantity > 0))";
+        params.push(dateFilter, dateFilter);
+      } else {
+        sql += ' AND plan_date = ?';
+        params.push(dateFilter);
+      }
     }
     
     sql += ' ORDER BY plan_date DESC, id DESC';
