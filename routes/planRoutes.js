@@ -13,6 +13,11 @@ router.get('/', async (req, res) => {
     
     let sql = 'SELECT * FROM despatch_plans WHERE 1=1';
     let params = [];
+
+    if (req.user.role !== 'admin' && (req.user.customer_name || req.user.vendor_code)) {
+      sql += ' AND (customer_name = ? OR vendor_code = ? OR user_id = ?)';
+      params.push(req.user.customer_name || '', req.user.vendor_code || '', req.user.id);
+    }
     
     if (isToday) {
       // Include today's plans + pending carryovers
@@ -23,7 +28,7 @@ router.get('/', async (req, res) => {
       params.push(dateFilter);
     }
     
-    sql += ' ORDER BY plan_date DESC';
+    sql += ' ORDER BY plan_date DESC, id DESC';
     
     const plans = await query(sql, params);
     res.json(plans);
@@ -43,10 +48,23 @@ router.post('/import', authorizeRoles('admin', 'sales'), async (req, res) => {
     const today = new Date().toISOString().split('T')[0];
     
     for (const plan of plans) {
-      const { part_number, quantity, user_id } = plan;
+      const { part_number, quantity, user_id, customer_name, vendor_code } = plan;
       const targetUserId = user_id || req.user.id;
+      const customer = customer_name || req.user.customer_name || null;
+      const vendor = vendor_code || req.user.vendor_code || null;
       
-      const existing = await query('SELECT * FROM despatch_plans WHERE user_id = ? AND part_number = ? AND plan_date = ?', [targetUserId, part_number, today]);
+      let existing;
+      if (customer) {
+        existing = await query(
+          'SELECT * FROM despatch_plans WHERE customer_name = ? AND part_number = ? AND plan_date = ?',
+          [customer, part_number, today]
+        );
+      } else {
+        existing = await query(
+          'SELECT * FROM despatch_plans WHERE user_id = ? AND part_number = ? AND plan_date = ?',
+          [targetUserId, part_number, today]
+        );
+      }
       
       if (existing.length > 0) {
         const e = existing[0];
@@ -57,8 +75,8 @@ router.post('/import', authorizeRoles('admin', 'sales'), async (req, res) => {
         );
       } else {
         await execute(
-          "INSERT INTO despatch_plans (user_id, part_number, quantity, balance_quantity, scanned_quantity, status, plan_date) VALUES (?, ?, ?, ?, 0, 'pending', ?)",
-          [targetUserId, part_number, quantity, quantity, today]
+          "INSERT INTO despatch_plans (user_id, part_number, quantity, balance_quantity, scanned_quantity, status, plan_date, customer_name, vendor_code) VALUES (?, ?, ?, ?, 0, 'pending', ?, ?, ?)",
+          [targetUserId, part_number, quantity, quantity, today, customer, vendor]
         );
       }
     }
@@ -73,13 +91,15 @@ router.post('/import', authorizeRoles('admin', 'sales'), async (req, res) => {
 
 router.post('/', authorizeRoles('admin', 'sales'), async (req, res) => {
   try {
-    const { part_number, quantity, user_id, plan_date } = req.body;
+    const { part_number, quantity, user_id, plan_date, customer_name, vendor_code } = req.body;
     const targetUserId = user_id || req.user.id;
     const date = plan_date || new Date().toISOString().split('T')[0];
+    const customer = customer_name || req.user.customer_name || null;
+    const vendor = vendor_code || req.user.vendor_code || null;
     
     await execute(
-      "INSERT INTO despatch_plans (user_id, part_number, quantity, balance_quantity, scanned_quantity, status, plan_date) VALUES (?, ?, ?, ?, 0, 'pending', ?)",
-      [targetUserId, part_number, quantity, quantity, date]
+      "INSERT INTO despatch_plans (user_id, part_number, quantity, balance_quantity, scanned_quantity, status, plan_date, customer_name, vendor_code) VALUES (?, ?, ?, ?, 0, 'pending', ?, ?, ?)",
+      [targetUserId, part_number, quantity, quantity, date, customer, vendor]
     );
     
     emitToAll('despatch:plans-changed', { action: 'create' });

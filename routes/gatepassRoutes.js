@@ -14,9 +14,13 @@ router.post('/', async (req, res) => {
 
   let connection;
   try {
-    const plans = await query(
-      "SELECT * FROM despatch_plans WHERE status = 'completed' AND gate_pass_number IS NULL"
-    );
+    let plansQuery = "SELECT * FROM despatch_plans WHERE status = 'completed' AND gate_pass_number IS NULL";
+    let plansParams = [];
+    if (req.user.role !== 'admin' && (req.user.customer_name || req.user.vendor_code)) {
+      plansQuery += " AND (customer_name = ? OR vendor_code = ?)";
+      plansParams.push(req.user.customer_name || '', req.user.vendor_code || '');
+    }
+    const plans = await query(plansQuery, plansParams);
 
     if (plans.length === 0) {
       return res.status(400).json({ message: 'No completed parts to dispatch' });

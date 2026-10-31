@@ -6,7 +6,8 @@ import cookieParser from 'cookie-parser';
 import { Server } from 'socket.io';
 import { pool, testConnection, closePool, execute } from './config/db.js';
 import { initSocket } from './utils/socket.js';
-
+import path from 'path';
+import { fileURLToPath } from 'url';
 import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import planRoutes from './routes/planRoutes.js';
@@ -17,6 +18,8 @@ import analyticsRoutes from './routes/analyticsRoutes.js';
 const app = express();
 app.set('trust proxy', 1);
 const httpServer = http.createServer(app);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
@@ -65,6 +68,14 @@ app.use('/api/plans', planRoutes);
 app.use('/api/scan', scanRoutes);
 app.use('/api/gatepass', gatepassRoutes);
 app.use('/api/analytics', analyticsRoutes);
+
+app.use(express.static(path.join(__dirname, "/dist")));
+
+app.get(/.*/, (req, res, next) => {
+  if (req.path.startsWith("/api/")) return next();
+  res.sendFile(path.join(__dirname, "./dist", "index.html"));
+});
+
 
 async function bootstrap() {
   try {
@@ -142,6 +153,54 @@ async function bootstrap() {
     }
 
     try {
+      await execute(`ALTER TABLE despatch_plans ADD COLUMN customer_name VARCHAR(255) DEFAULT NULL`);
+    } catch (err) {
+      // Column may already exist
+    }
+
+    try {
+      await execute(`ALTER TABLE despatch_plans ADD COLUMN vendor_code VARCHAR(100) DEFAULT NULL`);
+    } catch (err) {
+      // Column may already exist
+    }
+
+    try {
+      await execute(`
+        UPDATE despatch_plans dp 
+        JOIN users u ON dp.user_id = u.id 
+        SET dp.customer_name = u.customer_name, dp.vendor_code = u.vendor_code 
+        WHERE (dp.customer_name IS NULL OR dp.customer_name = '') 
+          AND (u.customer_name IS NOT NULL AND u.customer_name != '')
+      `);
+    } catch (err) {
+      // Backfill ignore
+    }
+
+    try {
+      await execute(`
+        UPDATE users u 
+        JOIN (SELECT user_id, MAX(vendor_code) as vc FROM scan_logs WHERE vendor_code IS NOT NULL AND vendor_code != '' GROUP BY user_id) s 
+        ON u.id = s.user_id 
+        SET u.vendor_code = s.vc 
+        WHERE (u.vendor_code IS NULL OR u.vendor_code = '')
+      `);
+    } catch (err) {
+      // Backfill ignore
+    }
+
+    try {
+      await execute(`
+        UPDATE users u 
+        JOIN (SELECT vendor_code, MAX(customer_name) as cn FROM users WHERE customer_name IS NOT NULL AND customer_name != '' GROUP BY vendor_code) ref 
+        ON u.vendor_code = ref.vendor_code 
+        SET u.customer_name = ref.cn 
+        WHERE (u.customer_name IS NULL OR u.customer_name = '')
+      `);
+    } catch (err) {
+      // Backfill ignore
+    }
+
+    try {
       await execute(`UPDATE scan_logs SET scanned_label = raw_scan_text WHERE scanned_label IS NULL`);
     } catch (err) {
       // Backfill ignore
@@ -151,6 +210,8 @@ async function bootstrap() {
       CREATE TABLE IF NOT EXISTS despatch_plans (
         id INT AUTO_INCREMENT PRIMARY KEY,
         user_id INT NOT NULL,
+        customer_name VARCHAR(255) DEFAULT NULL,
+        vendor_code VARCHAR(100) DEFAULT NULL,
         part_number VARCHAR(255) NOT NULL,
         quantity INT NOT NULL,
         balance_quantity INT NOT NULL,

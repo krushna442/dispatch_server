@@ -89,10 +89,20 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const plan = await queryOne(
-      "SELECT * FROM despatch_plans WHERE part_number = ? AND balance_quantity > 0 AND status = 'pending' ORDER BY plan_date ASC LIMIT 1",
-      [partNo]
-    );
+    // Prioritize pending plans matching the operator's customer group / vendor code
+    let plan = null;
+    if (req.user.vendor_code || req.user.customer_name) {
+      plan = await queryOne(
+        "SELECT * FROM despatch_plans WHERE part_number = ? AND balance_quantity > 0 AND status = 'pending' AND (vendor_code = ? OR customer_name = ?) ORDER BY plan_date ASC LIMIT 1",
+        [partNo, req.user.vendor_code || '', req.user.customer_name || '']
+      );
+    }
+    if (!plan) {
+      plan = await queryOne(
+        "SELECT * FROM despatch_plans WHERE part_number = ? AND balance_quantity > 0 AND status = 'pending' ORDER BY plan_date ASC LIMIT 1",
+        [partNo]
+      );
+    }
 
     if (!plan) {
       return res.status(400).json({ message: 'Part number not found in despatch plan or already completed' });
@@ -160,8 +170,16 @@ router.get('/logs', async (req, res) => {
     let params = [];
     
     if (req.user.role !== 'admin') {
-      sql += ' AND s.user_id = ?';
-      params.push(req.user.id);
+      if (req.user.role === 'sales' && (req.user.vendor_code || req.user.customer_name)) {
+        sql += ' AND (s.vendor_code = ? OR s.user_id = ? OR s.plan_id IN (SELECT id FROM despatch_plans WHERE customer_name = ? OR vendor_code = ?))';
+        params.push(req.user.vendor_code || '', req.user.id, req.user.customer_name || '', req.user.vendor_code || '');
+      } else if (req.user.vendor_code) {
+        sql += ' AND (s.user_id = ? OR s.vendor_code = ?)';
+        params.push(req.user.id, req.user.vendor_code);
+      } else {
+        sql += ' AND s.user_id = ?';
+        params.push(req.user.id);
+      }
     }
     
     if (req.query.date) {
@@ -210,8 +228,16 @@ router.get('/export', async (req, res) => {
     let params = [];
     
     if (req.user.role !== 'admin') {
-      sql += ' AND s.user_id = ?';
-      params.push(req.user.id);
+      if (req.user.role === 'sales' && (req.user.vendor_code || req.user.customer_name)) {
+        sql += ' AND (s.vendor_code = ? OR s.user_id = ? OR s.plan_id IN (SELECT id FROM despatch_plans WHERE customer_name = ? OR vendor_code = ?))';
+        params.push(req.user.vendor_code || '', req.user.id, req.user.customer_name || '', req.user.vendor_code || '');
+      } else if (req.user.vendor_code) {
+        sql += ' AND (s.user_id = ? OR s.vendor_code = ?)';
+        params.push(req.user.id, req.user.vendor_code);
+      } else {
+        sql += ' AND s.user_id = ?';
+        params.push(req.user.id);
+      }
     }
 
     if (req.query.date) {
