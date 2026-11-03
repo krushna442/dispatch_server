@@ -96,6 +96,8 @@ async function bootstrap() {
         vendor_code VARCHAR(100),
         customer_name VARCHAR(255),
         receive_despatch_mail BOOLEAN DEFAULT FALSE,
+        reset_token VARCHAR(255) DEFAULT NULL,
+        reset_token_expiry TIMESTAMP NULL DEFAULT NULL,
         is_active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
@@ -112,6 +114,18 @@ async function bootstrap() {
 
     try {
       await execute(`ALTER TABLE users ADD COLUMN receive_despatch_mail BOOLEAN DEFAULT FALSE`);
+    } catch (err) {
+      // Column may already exist
+    }
+
+    try {
+      await execute(`ALTER TABLE users ADD COLUMN reset_token VARCHAR(255) DEFAULT NULL`);
+    } catch (err) {
+      // Column may already exist
+    }
+
+    try {
+      await execute(`ALTER TABLE users ADD COLUMN reset_token_expiry TIMESTAMP NULL DEFAULT NULL`);
     } catch (err) {
       // Column may already exist
     }
