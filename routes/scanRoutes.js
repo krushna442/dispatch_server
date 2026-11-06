@@ -97,6 +97,13 @@ router.post('/', async (req, res) => {
         [partNo, req.user.vendor_code || '', req.user.customer_name || '']
       );
     }
+    // If not matched yet, prioritize plan matching the vendor code parsed from scanned barcode
+    if (!plan && vendorCode) {
+      plan = await queryOne(
+        "SELECT * FROM despatch_plans WHERE part_number = ? AND balance_quantity > 0 AND status = 'pending' AND vendor_code = ? ORDER BY plan_date ASC LIMIT 1",
+        [partNo, vendorCode]
+      );
+    }
     if (!plan) {
       plan = await queryOne(
         "SELECT * FROM despatch_plans WHERE part_number = ? AND balance_quantity > 0 AND status = 'pending' ORDER BY plan_date ASC LIMIT 1",
