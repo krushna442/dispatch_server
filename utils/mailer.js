@@ -60,7 +60,7 @@ async function sendWithRetry(mailOptions, attempt = 0) {
 }
 
 // ─── Public sendMail ─────────────────────────────────────────────────────────
-export const sendMail = async ({ to, subject, html, attachments = [] }) => {
+export const sendMail = async ({ to, subject, html, attachments = [], cc }) => {
   try {
     if (!to || to.length === 0) return;
 
@@ -81,12 +81,19 @@ export const sendMail = async ({ to, subject, html, attachments = [] }) => {
     }
 
     const mailOptions = {
-      from:        process.env.MAIL_USER,
+      from: {
+        name: "rsb lko",
+        address: process.env.MAIL_USER,
+      },
       to:          Array.isArray(to) ? to.join(",") : to,
       subject,
       html,
       attachments,
     };
+
+    if (cc) {
+      mailOptions.cc = Array.isArray(cc) ? cc.join(",") : cc;
+    }
 
     const info = await sendWithRetry(mailOptions);
     console.log("[Mailer] Message sent:", info.messageId);
