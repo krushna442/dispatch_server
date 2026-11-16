@@ -11,12 +11,14 @@ dotenv.config();
 // maxConnections:2 → never open more than 2 simultaneous connections to Gmail.z
 // rateDelta / rateLimit → max 3 messages per 5 s to avoid SMTP rate limiting.
 const transporter = nodemailer.createTransport({
-  service: "gmail",
   pool: true,            // ← reuse connection instead of reconnecting each time
   maxConnections: 2,     // ← cap concurrent connections (was unlimited)
   maxMessages: Infinity,
   rateDelta: 5000,       // sliding window in ms
   rateLimit: 3,          // max messages per rateDelta window
+      host: "mapi.mailngx.com",
+      port: 587, // try 587 first
+      secure: false, // true if using 465
   auth: {
     user: process.env.MAIL_USER,
     pass: process.env.MAIL_PASSWORD,

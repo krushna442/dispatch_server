@@ -77,47 +77,53 @@ router.get('/', async (req, res) => {
     const singleDate = req.query.date;
     const customerFilter = req.query.customer_name || req.query.customer;
     
-    let sql = 'SELECT * FROM despatch_plans WHERE 1=1';
+    let sql = `
+      SELECT 
+        dp.*,
+        u.name as uploader_name,
+        u.username as uploader_username,
+        u.role as uploader_role
+      FROM despatch_plans dp
+      LEFT JOIN users u ON dp.user_id = u.id
+      WHERE 1=1
+    `;
     let params = [];
 
     // Filter by customer if requested (or 'all' for all customers)
     if (customerFilter && customerFilter !== 'all') {
-      sql += ' AND customer_name = ?';
+      sql += ' AND dp.customer_name = ?';
       params.push(customerFilter);
     }
 
     // Role-based visibility:
-    // Operator is constrained to their assigned customer group / vendor code
+    // Operator is constrained to their assigned customer group / vendor code if set
     // Sales users with a dedicated customer see plans matching their customer OR any plan they uploaded
     // Admins see all plans across all customers
     if (req.user.role === 'operator') {
       if (req.user.customer_name || req.user.vendor_code) {
-        sql += ' AND (customer_name = ? OR vendor_code = ? OR user_id = ?)';
+        sql += ' AND (dp.customer_name = ? OR dp.vendor_code = ? OR dp.user_id = ?)';
         params.push(req.user.customer_name || '', req.user.vendor_code || '', req.user.id);
-      } else {
-        sql += ' AND user_id = ?';
-        params.push(req.user.id);
       }
     } else if (req.user.role === 'sales' && req.user.customer_name) {
-      sql += ' AND (customer_name = ? OR vendor_code = ? OR user_id = ?)';
+      sql += ' AND (dp.customer_name = ? OR dp.vendor_code = ? OR dp.user_id = ?)';
       params.push(req.user.customer_name, req.user.vendor_code || '', req.user.id);
     }
     
     if (startDate && endDate) {
       if (startDate === endDate) {
         if (startDate === today) {
-          sql += " AND (plan_date = ? OR (plan_date < ? AND status = 'pending' AND balance_quantity > 0))";
+          sql += " AND (dp.plan_date = ? OR (dp.plan_date < ? AND dp.status = 'pending' AND dp.balance_quantity > 0))";
           params.push(startDate, startDate);
         } else {
-          sql += ' AND plan_date = ?';
+          sql += ' AND dp.plan_date = ?';
           params.push(startDate);
         }
       } else {
         if (endDate >= today) {
-          sql += " AND ((plan_date BETWEEN ? AND ?) OR (plan_date < ? AND status = 'pending' AND balance_quantity > 0))";
+          sql += " AND ((dp.plan_date BETWEEN ? AND ?) OR (dp.plan_date < ? AND dp.status = 'pending' AND dp.balance_quantity > 0))";
           params.push(startDate, endDate, startDate);
         } else {
-          sql += ' AND plan_date BETWEEN ? AND ?';
+          sql += ' AND dp.plan_date BETWEEN ? AND ?';
           params.push(startDate, endDate);
         }
       }
@@ -126,15 +132,15 @@ router.get('/', async (req, res) => {
       const isToday = dateFilter === today;
       if (isToday) {
         // Include today's plans + pending carryovers
-        sql += " AND (plan_date = ? OR (plan_date < ? AND status = 'pending' AND balance_quantity > 0))";
+        sql += " AND (dp.plan_date = ? OR (dp.plan_date < ? AND dp.status = 'pending' AND dp.balance_quantity > 0))";
         params.push(dateFilter, dateFilter);
       } else {
-        sql += ' AND plan_date = ?';
+        sql += ' AND dp.plan_date = ?';
         params.push(dateFilter);
       }
     }
     
-    sql += ' ORDER BY plan_date DESC, id DESC';
+    sql += ' ORDER BY dp.plan_date DESC, dp.id DESC';
     
     const plans = await query(sql, params);
     res.json(plans);
@@ -180,12 +186,12 @@ router.post('/import', authorizeRoles('admin', 'sales'), async (req, res) => {
       let existing;
       if (customer) {
         existing = await query(
-          'SELECT * FROM despatch_plans WHERE customer_name = ? AND part_number = ? AND plan_date = ?',
-          [customer, part_number, targetDate]
+          'SELECT * FROM despatch_plans WHERE user_id = ? AND customer_name = ? AND part_number = ? AND plan_date = ?',
+          [targetUserId, customer, part_number, targetDate]
         );
       } else {
         existing = await query(
-          'SELECT * FROM despatch_plans WHERE user_id = ? AND part_number = ? AND plan_date = ?',
+          'SELECT * FROM despatch_plans WHERE user_id = ? AND (customer_name IS NULL OR customer_name = "") AND part_number = ? AND plan_date = ?',
           [targetUserId, part_number, targetDate]
         );
       }
