@@ -113,49 +113,46 @@ router.get('/users', authorizeRoles('admin', 'sales'), async (req, res) => {
         u.role,
         u.customer_name,
         u.vendor_code,
-        COALESCE(
-          GREATEST(
-            CASE 
-              WHEN u.customer_name IS NOT NULL AND u.customer_name != '' THEN (
-                SELECT COUNT(*) FROM despatch_plans WHERE customer_name = u.customer_name
-              )
-              WHEN u.vendor_code IS NOT NULL AND u.vendor_code != '' THEN (
-                SELECT COUNT(*) FROM despatch_plans WHERE vendor_code = u.vendor_code
-              )
-              ELSE (
-                SELECT COUNT(*) FROM despatch_plans WHERE user_id = u.id
-              )
-            END,
-            (SELECT COUNT(DISTINCT plan_id) FROM scan_logs WHERE user_id = u.id AND plan_id IS NOT NULL AND (status IS NULL OR status = 'success'))
-          ),
-          0
-        ) as total_plans,
-        COALESCE(
-          GREATEST(
-            CASE 
-              WHEN u.customer_name IS NOT NULL AND u.customer_name != '' THEN (
-                SELECT COUNT(*) FROM despatch_plans WHERE customer_name = u.customer_name AND status = 'completed'
-              )
-              WHEN u.vendor_code IS NOT NULL AND u.vendor_code != '' THEN (
-                SELECT COUNT(*) FROM despatch_plans WHERE vendor_code = u.vendor_code AND status = 'completed'
-              )
-              ELSE (
-                SELECT COUNT(*) FROM despatch_plans WHERE user_id = u.id AND status = 'completed'
-              )
-            END,
-            (SELECT COUNT(DISTINCT sl.plan_id) FROM scan_logs sl 
-             JOIN despatch_plans dp ON sl.plan_id = dp.id 
-             WHERE sl.user_id = u.id AND dp.status = 'completed' AND (sl.status IS NULL OR sl.status = 'success'))
-          ),
-          0
-        ) as completed_plans,
-        COALESCE((SELECT COUNT(*) FROM scan_logs WHERE user_id = u.id AND (status IS NULL OR status = 'success')), 0) as scans,
+        (SELECT COUNT(*) FROM despatch_plans WHERE user_id = u.id) as uploaded_plans,
+        (SELECT COUNT(*) FROM despatch_plans WHERE user_id = u.id AND status = 'completed') as completed_uploaded_plans,
         COALESCE((SELECT COUNT(DISTINCT plan_id) FROM scan_logs WHERE user_id = u.id AND plan_id IS NOT NULL AND (status IS NULL OR status = 'success')), 0) as user_scanned_plans,
+        COALESCE((
+          SELECT COUNT(DISTINCT sl.plan_id) 
+          FROM scan_logs sl 
+          JOIN despatch_plans dp ON sl.plan_id = dp.id 
+          WHERE sl.user_id = u.id AND dp.status = 'completed' AND (sl.status IS NULL OR sl.status = 'success')
+        ), 0) as completed_scanned_plans,
+        COALESCE((SELECT COUNT(*) FROM scan_logs WHERE user_id = u.id AND (status IS NULL OR status = 'success')), 0) as scans,
         (SELECT MAX(scan_date) FROM scan_logs WHERE user_id = u.id) as last_active
       FROM users u
       ${userFilter}
-      ORDER BY scans DESC, total_plans DESC
+      ORDER BY scans DESC, (SELECT COUNT(*) FROM despatch_plans WHERE user_id = u.id) DESC
     `, params);
+
+    // Fetch distinct customers each user has uploaded plans for
+    const uploaderCustomers = await query(`
+      SELECT DISTINCT user_id, customer_name
+      FROM despatch_plans
+      WHERE customer_name IS NOT NULL AND customer_name != ''
+    `);
+
+    // Fetch distinct customers each user has scanned for
+    const scannerCustomers = await query(`
+      SELECT DISTINCT sl.user_id, dp.customer_name
+      FROM scan_logs sl
+      JOIN despatch_plans dp ON sl.plan_id = dp.id
+      WHERE dp.customer_name IS NOT NULL AND dp.customer_name != ''
+    `);
+
+    const customerMap = {};
+    for (const r of uploaderCustomers) {
+      if (!customerMap[r.user_id]) customerMap[r.user_id] = new Set();
+      customerMap[r.user_id].add(r.customer_name);
+    }
+    for (const r of scannerCustomers) {
+      if (!customerMap[r.user_id]) customerMap[r.user_id] = new Set();
+      customerMap[r.user_id].add(r.customer_name);
+    }
 
     // Fetch breakdown of who scanned plans uploaded by each user
     const scannedByRows = await query(`
@@ -217,15 +214,56 @@ router.get('/users', authorizeRoles('admin', 'sales'), async (req, res) => {
       });
     }
 
-    const enrichedStats = stats.map(u => ({
-      ...u,
-      total_plans: Number(u.total_plans) || 0,
-      completed_plans: Number(u.completed_plans) || 0,
-      scans: Number(u.scans) || 0,
-      user_scanned_plans: Number(u.user_scanned_plans) || 0,
-      scanned_by: scannedByMap[u.id] || [],
-      scanned_for: scannedForMap[u.id] || []
-    }));
+    const enrichedStats = stats.map(u => {
+      const uploaded = Number(u.uploaded_plans) || 0;
+      const completedUploaded = Number(u.completed_uploaded_plans) || 0;
+      const scanned = Number(u.user_scanned_plans) || 0;
+      const completedScanned = Number(u.completed_scanned_plans) || 0;
+
+      let total_plans = 0;
+      let completed_plans = 0;
+
+      if (u.role === 'operator') {
+        // Operators only scan
+        total_plans = scanned;
+        completed_plans = completedScanned;
+      } else {
+        // Admin / Sales: primary responsibility is uploading plans
+        if (uploaded > 0) {
+          total_plans = uploaded;
+          completed_plans = completedUploaded;
+        } else {
+          // If they didn't upload any plans, but scanned some plans (e.g. Alok Majhi)
+          total_plans = scanned;
+          completed_plans = completedScanned;
+        }
+      }
+
+      // Collect active customers for this user
+      const userCustomersSet = customerMap[u.id] || new Set();
+      if (u.customer_name) userCustomersSet.add(u.customer_name);
+      const activeCustomers = Array.from(userCustomersSet);
+
+      return {
+        id: u.id,
+        name: u.name,
+        username: u.username,
+        role: u.role,
+        customer_name: u.customer_name,
+        vendor_code: u.vendor_code,
+        customers: activeCustomers,
+        total_plans,
+        completed_plans,
+        uploaded_plans: uploaded,
+        completed_uploaded_plans: completedUploaded,
+        scans: Number(u.scans) || 0,
+        user_scanned_plans: scanned,
+        completed_scanned_plans: completedScanned,
+        last_active: u.last_active,
+        scanned_by: scannedByMap[u.id] || [],
+        scanned_for: scannedForMap[u.id] || []
+      };
+    });
     
     res.json(enrichedStats);
   } catch (error) {
