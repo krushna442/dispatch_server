@@ -14,6 +14,7 @@ import planRoutes from './routes/planRoutes.js';
 import scanRoutes from './routes/scanRoutes.js';
 import gatepassRoutes from './routes/gatepassRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
+import backupRoutes from './routes/backupRoutes.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -68,6 +69,7 @@ app.use('/api/plans', planRoutes);
 app.use('/api/scan', scanRoutes);
 app.use('/api/gatepass', gatepassRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/backup', backupRoutes);
 
 app.use(express.static(path.join(__dirname, "/dist")));
 
@@ -289,6 +291,26 @@ async function bootstrap() {
         quantity INT NOT NULL,
         FOREIGN KEY (gate_pass_id) REFERENCES gate_passes(id),
         FOREIGN KEY (plan_id) REFERENCES despatch_plans(id)
+      )
+    `);
+
+    await execute(`
+      CREATE TABLE IF NOT EXISTS activity_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NULL,
+        username VARCHAR(255) NULL,
+        user_name VARCHAR(255) NULL,
+        role VARCHAR(50) NULL,
+        action VARCHAR(100) NOT NULL,
+        action_type ENUM('auth', 'plan', 'scan', 'user', 'gatepass', 'system') NOT NULL DEFAULT 'system',
+        description TEXT NOT NULL,
+        details JSON NULL,
+        ip_address VARCHAR(100) NULL,
+        user_agent TEXT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_action_type (action_type),
+        INDEX idx_user_id (user_id),
+        INDEX idx_created_at (created_at)
       )
     `);
 

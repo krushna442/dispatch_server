@@ -1,6 +1,7 @@
 import express from 'express';
 import { query, execute } from '../config/db.js';
 import { protectRoute, adminOnly } from '../middleware/auth.js';
+import { logActivity } from '../utils/activityLogger.js';
 
 const router = express.Router();
 
@@ -9,7 +10,7 @@ router.use(adminOnly);
 
 router.get('/', async (req, res) => {
   try {
-    const users = await query('SELECT id, name, username, email, role, vendor_code, customer_name, receive_despatch_mail, is_active, created_at FROM users');
+    const users = await query('SELECT id, name, username, password, email, role, vendor_code, customer_name, receive_despatch_mail, is_active, created_at FROM users');
     res.json(users);
   } catch (error) {
     console.error('Error fetching users:', error);
@@ -32,6 +33,12 @@ router.post('/', async (req, res) => {
       'INSERT INTO users (name, username, password, email, role, vendor_code, customer_name, receive_despatch_mail) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [name, username, password, email || null, userRole, vendor_code || null, customer_name || null, receive_despatch_mail ? 1 : 0]
     );
+
+    await logActivity(req, {
+      action: 'USER_CREATE',
+      action_type: 'user',
+      description: `Created user @${username} (${name}) as ${userRole.toUpperCase()}${customer_name ? ` for customer "${customer_name}"` : ''}`
+    });
 
     res.status(201).json({ id: result.insertId, message: 'User created successfully' });
   } catch (error) {
@@ -63,6 +70,12 @@ router.put('/:id', async (req, res) => {
 
     await execute(sql, params);
     
+    await logActivity(req, {
+      action: 'USER_UPDATE',
+      action_type: 'user',
+      description: `Updated user profile #${req.params.id} (${name}, @${req.user?.username})`
+    });
+
     res.json({ message: 'User updated successfully' });
   } catch (error) {
     console.error('Error updating user:', error);
@@ -73,6 +86,13 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     await execute('UPDATE users SET is_active = false WHERE id = ?', [req.params.id]);
+
+    await logActivity(req, {
+      action: 'USER_DEACTIVATE',
+      action_type: 'user',
+      description: `Deactivated user account #${req.params.id}`
+    });
+
     res.json({ message: 'User deactivated successfully' });
   } catch (error) {
     console.error('Error deleting user:', error);

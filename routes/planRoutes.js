@@ -2,6 +2,7 @@ import express from 'express';
 import { query, queryOne, execute } from '../config/db.js';
 import { protectRoute, authorizeRoles } from '../middleware/auth.js';
 import { emitToAll } from '../utils/socket.js';
+import { logActivity } from '../utils/activityLogger.js';
 
 const router = express.Router();
 router.use(protectRoute);
@@ -212,6 +213,11 @@ router.post('/import', authorizeRoles('admin', 'sales'), async (req, res) => {
     }
     
     emitToAll('despatch:plans-changed', { action: 'import' });
+    await logActivity(req, {
+      action: 'PLAN_IMPORT',
+      action_type: 'plan',
+      description: `Imported ${plans.length} dispatch plan items`
+    });
     res.json({ message: 'Plans imported successfully' });
   } catch (error) {
     console.error('Error importing plans:', error);
@@ -249,6 +255,11 @@ router.post('/', authorizeRoles('admin', 'sales'), async (req, res) => {
     );
     
     emitToAll('despatch:plans-changed', { action: 'create' });
+    await logActivity(req, {
+      action: 'PLAN_CREATE',
+      action_type: 'plan',
+      description: `Created plan for part ${part_number} (Qty: ${quantity})${customer ? ` for customer "${customer}"` : ''}`
+    });
     res.status(201).json({ message: 'Plan created successfully' });
   } catch (error) {
     console.error('Error creating plan:', error);
@@ -286,6 +297,11 @@ router.put('/:id', authorizeRoles('admin', 'sales'), async (req, res) => {
     );
     
     emitToAll('despatch:plans-changed', { action: 'update', id: planId });
+    await logActivity(req, {
+      action: 'PLAN_UPDATE',
+      action_type: 'plan',
+      description: `Updated plan #${planId} (${p.part_number}, Qty: ${quantity})`
+    });
     res.json({ message: 'Plan updated successfully' });
   } catch (error) {
     console.error('Error updating plan:', error);
@@ -305,6 +321,11 @@ router.delete('/:id', authorizeRoles('admin', 'sales'), async (req, res) => {
     await execute('DELETE FROM despatch_plans WHERE id = ?', [req.params.id]);
     
     emitToAll('despatch:plans-changed', { action: 'delete', id: req.params.id });
+    await logActivity(req, {
+      action: 'PLAN_DELETE',
+      action_type: 'plan',
+      description: `Deleted plan #${req.params.id} (${plan[0].part_number})`
+    });
     res.json({ message: 'Plan deleted successfully' });
   } catch (error) {
     console.error('Error deleting plan:', error);

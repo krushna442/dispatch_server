@@ -3,6 +3,7 @@ import { queryOne, execute, getConnection, query } from '../config/db.js';
 import { protectRoute } from '../middleware/auth.js';
 import { parseScanText } from '../utils/parseScanText.js';
 import { emitToAll } from '../utils/socket.js';
+import { logActivity } from '../utils/activityLogger.js';
 
 const router = express.Router();
 router.use(protectRoute);
@@ -78,6 +79,12 @@ router.post('/', async (req, res) => {
         scanned_at: scanDateObj
       };
       emitToAll('despatch:scan', rejectDetails);
+
+      await logActivity(req, {
+        action: 'SCAN_REJECT',
+        action_type: 'scan',
+        description: `Rejected duplicate scan for part ${partNo} (SN: ${partSlNo || 'N/A'})`
+      });
 
       return res.status(400).json({
         message: 'Duplicate scan detected',
@@ -155,6 +162,12 @@ router.post('/', async (req, res) => {
       scanned_at: scanDateObj
     };
     emitToAll('despatch:scan', scanDetails);
+
+    await logActivity(req, {
+      action: 'SCAN_SUCCESS',
+      action_type: 'scan',
+      description: `Scanned part ${partNo} (SN: ${partSlNo || 'N/A'}) against plan #${plan.id}`
+    });
 
     res.json({ message: 'Scan successful', parsed, plan_id: plan.id, raw_scan_text, scanned_label: raw_scan_text, status: 'success' });
   } catch (error) {

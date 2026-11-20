@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { queryOne, execute } from '../config/db.js';
 import { protectRoute } from '../middleware/auth.js';
 import { sendMail } from '../utils/mailer.js';
+import { logActivity } from '../utils/activityLogger.js';
 
 const router = express.Router();
 
@@ -29,10 +30,23 @@ router.post('/login', async (req, res) => {
     const user = await queryOne('SELECT * FROM users WHERE username = ?', [username]);
 
     if (!user || user.password !== password) {
+      await logActivity(req, {
+        action: 'LOGIN_FAILED',
+        action_type: 'auth',
+        description: `Failed login attempt for username "${username}"`,
+        username
+      });
       return res.status(401).json({ message: 'Invalid username or password' });
     }
 
     if (!user.is_active) {
+      await logActivity(req, {
+        action: 'LOGIN_BLOCKED',
+        action_type: 'auth',
+        description: `Blocked login attempt for deactivated user @${user.username}`,
+        userId: user.id,
+        username: user.username
+      });
       return res.status(401).json({ message: 'User account is disabled' });
     }
 
@@ -47,6 +61,16 @@ router.post('/login', async (req, res) => {
       secure: isProduction,
       sameSite: isProduction ? 'none' : 'lax',
       maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+    });
+
+    await logActivity(req, {
+      action: 'USER_LOGIN',
+      action_type: 'auth',
+      description: `User ${user.name} (@${user.username}) logged in successfully as ${user.role?.toUpperCase()}`,
+      userId: user.id,
+      username: user.username,
+      userName: user.name,
+      role: user.role
     });
 
     const userToReturn = { ...user };
