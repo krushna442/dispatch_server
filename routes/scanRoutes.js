@@ -21,8 +21,14 @@ router.post('/', async (req, res) => {
 
     const { format, partNo, vendorCode, partSlNo, dispatchDate, revNo } = parsed;
     
-    if (req.user.vendor_code && vendorCode && vendorCode !== req.user.vendor_code) {
-      return res.status(400).json({ message: `Vendor code mismatch. Expected: ${req.user.vendor_code}, Got: ${vendorCode}` });
+    if (req.user.vendor_code && vendorCode) {
+      const userCode = req.user.vendor_code.trim().toUpperCase();
+      const scanCode = vendorCode.trim().toUpperCase();
+      const userNorm = userCode.replace(/^V/, '');
+      const scanNorm = scanCode.replace(/^V/, '');
+      if (userCode !== scanCode && userNorm !== scanNorm) {
+        return res.status(400).json({ message: `Vendor code mismatch. Expected: ${req.user.vendor_code}, Got: ${vendorCode}` });
+      }
     }
 
     const unique_key = `${partSlNo}_${dispatchDate || 'ND'}`;
@@ -106,9 +112,14 @@ router.post('/', async (req, res) => {
     }
     // If not matched yet, prioritize plan matching the vendor code parsed from scanned barcode
     if (!plan && vendorCode) {
+      const scanCode = vendorCode.trim();
+      const scanNorm = scanCode.toUpperCase().replace(/^V/, '');
       plan = await queryOne(
-        "SELECT * FROM despatch_plans WHERE part_number = ? AND balance_quantity > 0 AND status = 'pending' AND vendor_code = ? ORDER BY plan_date ASC LIMIT 1",
-        [partNo, vendorCode]
+        `SELECT * FROM despatch_plans 
+         WHERE part_number = ? AND balance_quantity > 0 AND status = 'pending' 
+           AND (vendor_code = ? OR UPPER(vendor_code) = ? OR UPPER(REPLACE(vendor_code, 'V', '')) = ?) 
+         ORDER BY plan_date ASC LIMIT 1`,
+        [partNo, scanCode, scanCode.toUpperCase(), scanNorm]
       );
     }
     if (!plan) {

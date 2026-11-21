@@ -9,20 +9,36 @@ router.use(protectRoute);
 
 // Standard customer presets with their respective vendor codes
 const PRESET_CUSTOMERS = [
-  { customer_name: 'ASL & Switch Mobility', vendor_code: '7205761' },
-  { customer_name: 'Tata Motors (TML)', vendor_code: '7205761' },
-  { customer_name: 'VE Commercial Vehicles (VECB)', vendor_code: '113072' },
+  { customer_name: 'ASL PNR MBP', vendor_code: '7201012' },
+  { customer_name: 'ASL ALW MBP', vendor_code: '7205761' },
+  { customer_name: 'ASL ALH MBP', vendor_code: '7200868' },
+  { customer_name: 'Switch Mobility', vendor_code: '7207001' },
+  { customer_name: 'Tata Motors (TML)', vendor_code: 'R64535' },
   { customer_name: 'IPLT', vendor_code: '10830-6' },
-  { customer_name: 'MBP (R64535)', vendor_code: 'R64535' },
+  { customer_name: 'VE Commercial Vehicles (VECV)', vendor_code: 'V113072' },
 ];
 
-// Helper to find vendor code by customer name
+// Helper to find vendor code by customer name (with smart alias & keyword matching)
 function getPresetVendorCode(customerName) {
   if (!customerName) return null;
-  const match = PRESET_CUSTOMERS.find(
-    (c) => c.customer_name.toLowerCase().trim() === customerName.toLowerCase().trim()
+  const lower = customerName.toLowerCase().trim();
+
+  const directMatch = PRESET_CUSTOMERS.find(
+    (c) => c.customer_name.toLowerCase().trim() === lower
   );
-  return match ? match.vendor_code : null;
+  if (directMatch) return directMatch.vendor_code;
+
+  if (lower.includes('asl') && lower.includes('pnr')) return '7201012';
+  if (lower.includes('asl') && lower.includes('alw')) return '7205761';
+  if (lower.includes('asl') && lower.includes('alh')) return '7200868';
+  if (lower.includes('switch')) return '7207001';
+  if (lower.includes('tml') || lower.includes('tata')) return 'R64535';
+  if (lower.includes('iplt')) return '10830-6';
+  if (lower.includes('vecv') || lower.includes('vecb') || lower.includes('commercial vehicles')) return 'V113072';
+  if (lower.includes('mbp') && lower.includes('7201012')) return '7201012';
+  if (lower.includes('mbp') && lower.includes('r64535')) return 'R64535';
+
+  return null;
 }
 
 // GET /api/plans/customers - Unique customers list merged with standard presets

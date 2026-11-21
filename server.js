@@ -28,6 +28,10 @@ const ALLOWED_ORIGINS = [
   'http://127.0.0.1:5173',
   'http://127.0.0.1:3000',
   'https://dispatch-server-wcdx.onrender.com',
+  'https://rsblko.in',
+  'http://rsblko.in',
+  'https://www.rsblko.in',
+  'http://www.rsblko.in',
   process.env.CLIENT_URL,
   process.env.FRONTEND_URL
 ].filter(Boolean);
@@ -37,6 +41,7 @@ const corsOptions = {
     if (
       !origin ||
       ALLOWED_ORIGINS.includes(origin) ||
+      origin.includes('rsblko.in') ||
       origin.startsWith('http://localhost:') ||
       origin.startsWith('http://127.0.0.1:') ||
       origin.startsWith('http://192.168.') ||
@@ -47,7 +52,7 @@ const corsOptions = {
     ) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      callback(null, true);
     }
   },
   credentials: true
