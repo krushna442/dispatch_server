@@ -121,3 +121,90 @@ export function formatSubject(activity, customerName = null, vendorCode = null) 
   const custPrefix = info ? info.displayName : 'RSB Despatch';
   return `[${custPrefix}] - ${activity}`;
 }
+
+/**
+ * Normalizes customer name and vendor code strictly to standard preset names.
+ * Wherever vendor code is 7201012 or customer name mentions MBP/Pantnagar/ASL & Switch,
+ * it returns 'ASL PNR MBP' (7201012).
+ */
+export function normalizeCustomerPreset(customerName, vendorCode) {
+  const v = (vendorCode || '').trim();
+  const c = (customerName || '').trim();
+  const vUpper = v.toUpperCase();
+  const cLower = c.toLowerCase();
+
+  // 1. Pantnagar (7201012)
+  if (
+    v === '7201012' ||
+    cLower.includes('7201012') ||
+    cLower === 'mbp' ||
+    cLower.includes('asl & switch') ||
+    cLower.includes('pantnagar') ||
+    cLower.includes('all_p') ||
+    (cLower.includes('asl') && cLower.includes('pnr'))
+  ) {
+    return { customer_name: 'ASL PNR MBP', vendor_code: '7201012' };
+  }
+
+  // 2. Alwar (7205761)
+  if (
+    v === '7205761' ||
+    cLower.includes('7205761') ||
+    cLower.includes('alwar') ||
+    (cLower.includes('asl') && cLower.includes('alw'))
+  ) {
+    return { customer_name: 'ASL ALW MBP', vendor_code: '7205761' };
+  }
+
+  // 3. Hosur (7200868)
+  if (
+    v === '7200868' ||
+    cLower.includes('7200868') ||
+    cLower.includes('hosur') ||
+    (cLower.includes('asl') && cLower.includes('alh'))
+  ) {
+    return { customer_name: 'ASL ALH MBP', vendor_code: '7200868' };
+  }
+
+  // 4. Switch Mobility (7207001)
+  if (
+    v === '7207001' ||
+    cLower.includes('7207001') ||
+    (cLower.includes('switch') && !cLower.includes('&') && !cLower.includes('7201012'))
+  ) {
+    return { customer_name: 'Switch Mobility', vendor_code: '7207001' };
+  }
+
+  // 5. Tata Motors (R64535)
+  if (
+    vUpper === 'R64535' ||
+    cLower.includes('r64535') ||
+    cLower.includes('tml') ||
+    cLower.includes('tata')
+  ) {
+    return { customer_name: 'Tata Motors (TML)', vendor_code: 'R64535' };
+  }
+
+  // 6. IPLT (10830-6)
+  if (
+    v === '10830-6' ||
+    cLower.includes('10830-6') ||
+    cLower.includes('iplt')
+  ) {
+    return { customer_name: 'IPLT', vendor_code: '10830-6' };
+  }
+
+  // 7. VECV (V113072)
+  if (
+    vUpper === 'V113072' ||
+    v === '113072' ||
+    cLower.includes('v113072') ||
+    cLower.includes('113072') ||
+    cLower.includes('vecv') ||
+    cLower.includes('commercial vehicles')
+  ) {
+    return { customer_name: 'VE Commercial Vehicles (VECV)', vendor_code: 'V113072' };
+  }
+
+  return { customer_name: c || null, vendor_code: v || null };
+}

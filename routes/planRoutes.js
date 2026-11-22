@@ -4,6 +4,7 @@ import { protectRoute, authorizeRoles } from '../middleware/auth.js';
 import { emitToAll } from '../utils/socket.js';
 import { logActivity } from '../utils/activityLogger.js';
 import { notifyPlanAdd } from '../services/mailService.js';
+import { normalizeCustomerPreset } from '../utils/customerConfig.js';
 
 const router = express.Router();
 router.use(protectRoute);
@@ -22,23 +23,8 @@ const PRESET_CUSTOMERS = [
 // Helper to find vendor code by customer name (with smart alias & keyword matching)
 function getPresetVendorCode(customerName) {
   if (!customerName) return null;
-  const lower = customerName.toLowerCase().trim();
-
-  const directMatch = PRESET_CUSTOMERS.find(
-    (c) => c.customer_name.toLowerCase().trim() === lower
-  );
-  if (directMatch) return directMatch.vendor_code;
-
-  if (lower.includes('asl') && lower.includes('pnr')) return '7201012';
-  if (lower.includes('asl') && lower.includes('alw')) return '7205761';
-  if (lower.includes('asl') && lower.includes('alh')) return '7200868';
-  if (lower.includes('switch')) return '7207001';
-  if (lower.includes('tml') || lower.includes('tata')) return 'R64535';
-  if (lower.includes('iplt')) return '10830-6';
-  if (lower.includes('vecv') || lower.includes('vecb') || lower.includes('commercial vehicles')) return 'V113072';
-  if (lower.includes('mbp') && lower.includes('7201012')) return '7201012';
-  if (lower.includes('mbp') && lower.includes('r64535')) return 'R64535';
-
+  const norm = normalizeCustomerPreset(customerName, null);
+  if (norm.vendor_code) return norm.vendor_code;
   return null;
 }
 
@@ -63,19 +49,17 @@ router.get('/customers', async (req, res) => {
         vendor_code: p.vendor_code,
       });
     }
-    // 2. Add or update with database entries
+    // 2. Add or update with database entries, strictly normalized
     for (const row of dbCustomers) {
-      if (row.customer_name) {
-        const key = row.customer_name.toLowerCase().trim();
+      const norm = normalizeCustomerPreset(row.customer_name, row.vendor_code);
+      if (norm.customer_name) {
+        const key = norm.customer_name.toLowerCase().trim();
         if (customerMap.has(key)) {
-          if (row.vendor_code) {
-            customerMap.get(key).vendor_code = row.vendor_code;
+          if (norm.vendor_code) {
+            customerMap.get(key).vendor_code = norm.vendor_code;
           }
         } else {
-          customerMap.set(key, {
-            customer_name: row.customer_name,
-            vendor_code: row.vendor_code || '',
-          });
+          customerMap.set(key, norm);
         }
       }
     }
@@ -109,8 +93,13 @@ router.get('/', async (req, res) => {
 
     // Filter by customer if requested (or 'all' for all customers)
     if (customerFilter && customerFilter !== 'all') {
-      sql += ' AND dp.customer_name = ?';
-      params.push(customerFilter);
+      const normFilter = normalizeCustomerPreset(customerFilter, null);
+      if (normFilter.customer_name === 'ASL PNR MBP' || customerFilter === '7201012') {
+        sql += " AND (dp.customer_name = 'ASL PNR MBP' OR dp.vendor_code = '7201012' OR dp.customer_name IN ('MBP', 'MBP (7201012)', 'ASL & Switch Mobility'))";
+      } else {
+        sql += ' AND (dp.customer_name = ? OR dp.vendor_code = ?)';
+        params.push(normFilter.customer_name || customerFilter, normFilter.vendor_code || customerFilter);
+      }
     }
 
     // Role-based visibility:
@@ -161,7 +150,15 @@ router.get('/', async (req, res) => {
     sql += ' ORDER BY dp.plan_date DESC, dp.id DESC';
     
     const plans = await query(sql, params);
-    res.json(plans);
+    const normalizedPlans = plans.map(p => {
+      const norm = normalizeCustomerPreset(p.customer_name, p.vendor_code);
+      return {
+        ...p,
+        customer_name: norm.customer_name || p.customer_name,
+        vendor_code: norm.vendor_code || p.vendor_code
+      };
+    });
+    res.json(normalizedPlans);
   } catch (error) {
     console.error('Error fetching plans:', error);
     res.status(500).json({ message: 'Server error' });
@@ -180,8 +177,11 @@ router.post('/import', authorizeRoles('admin', 'sales'), async (req, res) => {
     for (const plan of plans) {
       const { part_number, quantity, user_id, customer_name, vendor_code, schedule_date, plan_date } = plan;
       const targetUserId = user_id || req.user.id;
-      const customer = (customer_name && customer_name.trim()) || req.user.customer_name || null;
-      let vendor = (vendor_code && vendor_code.trim()) || req.user.vendor_code || null;
+      const rawCustomer = (customer_name && customer_name.trim()) || req.user.customer_name || null;
+      const rawVendor = (vendor_code && vendor_code.trim()) || req.user.vendor_code || null;
+      const normalized = normalizeCustomerPreset(rawCustomer, rawVendor);
+      const customer = normalized.customer_name;
+      let vendor = normalized.vendor_code;
       const targetDate = plan_date || schedule_date || today;
 
       // Auto-lookup vendor_code if customer name is known but vendor_code is missing
@@ -257,8 +257,11 @@ router.post('/', authorizeRoles('admin', 'sales'), async (req, res) => {
     const { part_number, quantity, user_id, plan_date, schedule_date, customer_name, vendor_code } = req.body;
     const targetUserId = user_id || req.user.id;
     const date = plan_date || new Date().toISOString().split('T')[0];
-    const customer = (customer_name && customer_name.trim()) || req.user.customer_name || null;
-    let vendor = (vendor_code && vendor_code.trim()) || req.user.vendor_code || null;
+    const rawCustomer = (customer_name && customer_name.trim()) || req.user.customer_name || null;
+    const rawVendor = (vendor_code && vendor_code.trim()) || req.user.vendor_code || null;
+    const normalized = normalizeCustomerPreset(rawCustomer, rawVendor);
+    const customer = normalized.customer_name;
+    let vendor = normalized.vendor_code;
     
     if (customer && !vendor) {
       vendor = getPresetVendorCode(customer);
@@ -318,6 +321,10 @@ router.put('/:id', authorizeRoles('admin', 'sales'), async (req, res) => {
     
     const plan = await query('SELECT * FROM despatch_plans WHERE id = ?', [planId]);
     if (!plan.length) return res.status(404).json({ message: 'Plan not found' });
+    
+    const normalized = normalizeCustomerPreset(customer_name, vendor_code);
+    const customer = normalized.customer_name;
+    const vendor = normalized.vendor_code;
     
     const p = plan[0];
     const scanned = p.scanned_quantity;

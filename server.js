@@ -330,10 +330,35 @@ async function bootstrap() {
     try { await execute('ALTER TABLE users ADD COLUMN mail_monthly_report BOOLEAN DEFAULT FALSE'); } catch (err) {}
     try { await execute('UPDATE users SET mail_gate_pass = 1 WHERE receive_despatch_mail = 1'); } catch (err) {}
 
-    // Unify legacy MBP to ASL PNR MBP (Vendor 7201012 - Ashok Leyland Pantnagar)
+    // Unify all customer names and vendor codes according to official mapping:
+    // WHEREVER customer code is 7201012, update customer name to 'ASL PNR MBP'
     try {
-      await execute("UPDATE despatch_plans SET customer_name = 'ASL PNR MBP', vendor_code = '7201012' WHERE customer_name IN ('MBP', 'MBP (7201012)', 'MBP (R64535)')");
-      await execute("UPDATE users SET customer_name = 'ASL PNR MBP', vendor_code = '7201012' WHERE customer_name IN ('MBP', 'MBP (7201012)')");
+      await execute(`
+        UPDATE despatch_plans 
+        SET customer_name = 'ASL PNR MBP', vendor_code = '7201012' 
+        WHERE vendor_code = '7201012' 
+           OR customer_name IN ('MBP', 'MBP (7201012)', 'ASL & Switch Mobility', 'ASL & Switch Mobility (7201012)')
+           OR customer_name LIKE '%7201012%'
+      `);
+      await execute(`
+        UPDATE users 
+        SET customer_name = 'ASL PNR MBP', vendor_code = '7201012' 
+        WHERE vendor_code = '7201012' 
+           OR customer_name IN ('MBP', 'MBP (7201012)', 'ASL & Switch Mobility', 'ASL & Switch Mobility (7201012)')
+           OR customer_name LIKE '%7201012%'
+      `);
+      await execute("UPDATE despatch_plans SET customer_name = 'ASL ALW MBP', vendor_code = '7205761' WHERE vendor_code = '7205761' OR customer_name LIKE '%7205761%'");
+      await execute("UPDATE users SET customer_name = 'ASL ALW MBP', vendor_code = '7205761' WHERE vendor_code = '7205761' OR customer_name LIKE '%7205761%'");
+      await execute("UPDATE despatch_plans SET customer_name = 'ASL ALH MBP', vendor_code = '7200868' WHERE vendor_code = '7200868' OR customer_name LIKE '%7200868%'");
+      await execute("UPDATE users SET customer_name = 'ASL ALH MBP', vendor_code = '7200868' WHERE vendor_code = '7200868' OR customer_name LIKE '%7200868%'");
+      await execute("UPDATE despatch_plans SET customer_name = 'Switch Mobility', vendor_code = '7207001' WHERE (vendor_code = '7207001' OR customer_name LIKE '%7207001%') AND vendor_code != '7201012' AND customer_name NOT LIKE '%7201012%'");
+      await execute("UPDATE users SET customer_name = 'Switch Mobility', vendor_code = '7207001' WHERE (vendor_code = '7207001' OR customer_name LIKE '%7207001%') AND vendor_code != '7201012' AND customer_name NOT LIKE '%7201012%'");
+      await execute("UPDATE despatch_plans SET customer_name = 'Tata Motors (TML)', vendor_code = 'R64535' WHERE vendor_code = 'R64535' OR customer_name LIKE '%R64535%'");
+      await execute("UPDATE users SET customer_name = 'Tata Motors (TML)', vendor_code = 'R64535' WHERE vendor_code = 'R64535' OR customer_name LIKE '%R64535%'");
+      await execute("UPDATE despatch_plans SET customer_name = 'IPLT', vendor_code = '10830-6' WHERE vendor_code = '10830-6' OR customer_name LIKE '%10830-6%'");
+      await execute("UPDATE users SET customer_name = 'IPLT', vendor_code = '10830-6' WHERE vendor_code = '10830-6' OR customer_name LIKE '%10830-6%'");
+      await execute("UPDATE despatch_plans SET customer_name = 'VE Commercial Vehicles (VECV)', vendor_code = 'V113072' WHERE vendor_code IN ('V113072', '113072') OR customer_name LIKE '%V113072%'");
+      await execute("UPDATE users SET customer_name = 'VE Commercial Vehicles (VECV)', vendor_code = 'V113072' WHERE vendor_code IN ('V113072', '113072') OR customer_name LIKE '%V113072%'");
     } catch (err) {
       console.log('Customer name unification notice:', err.message);
     }
