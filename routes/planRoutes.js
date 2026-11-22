@@ -3,6 +3,7 @@ import { query, queryOne, execute } from '../config/db.js';
 import { protectRoute, authorizeRoles } from '../middleware/auth.js';
 import { emitToAll } from '../utils/socket.js';
 import { logActivity } from '../utils/activityLogger.js';
+import { notifyPlanAdd } from '../services/mailService.js';
 
 const router = express.Router();
 router.use(protectRoute);
@@ -234,6 +235,16 @@ router.post('/import', authorizeRoles('admin', 'sales'), async (req, res) => {
       action_type: 'plan',
       description: `Imported ${plans.length} dispatch plan items`
     });
+
+    // Asynchronously notify subscribed users with attached plan spreadsheet
+    notifyPlanAdd({
+      uploader: req.user,
+      plans,
+      customerName: plans[0]?.customer_name || req.user.customer_name,
+      vendorCode: plans[0]?.vendor_code || req.user.vendor_code,
+      source: 'Excel Import'
+    }).catch((err) => console.error('[PlanMail] Notification error:', err?.message || err));
+
     res.json({ message: 'Plans imported successfully' });
   } catch (error) {
     console.error('Error importing plans:', error);
@@ -276,6 +287,23 @@ router.post('/', authorizeRoles('admin', 'sales'), async (req, res) => {
       action_type: 'plan',
       description: `Created plan for part ${part_number} (Qty: ${quantity})${customer ? ` for customer "${customer}"` : ''}`
     });
+
+    // Asynchronously notify subscribed users
+    notifyPlanAdd({
+      uploader: req.user,
+      plans: [{
+        part_number,
+        quantity,
+        schedule_date: schedule_date || date,
+        plan_date: date,
+        customer_name: customer,
+        vendor_code: vendor
+      }],
+      customerName: customer,
+      vendorCode: vendor,
+      source: 'Manual Form'
+    }).catch((err) => console.error('[PlanMail] Notification error:', err?.message || err));
+
     res.status(201).json({ message: 'Plan created successfully' });
   } catch (error) {
     console.error('Error creating plan:', error);

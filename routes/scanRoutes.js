@@ -4,6 +4,7 @@ import { protectRoute } from '../middleware/auth.js';
 import { parseScanText } from '../utils/parseScanText.js';
 import { emitToAll } from '../utils/socket.js';
 import { logActivity } from '../utils/activityLogger.js';
+import { notifyScan } from '../services/mailService.js';
 
 const router = express.Router();
 router.use(protectRoute);
@@ -179,6 +180,20 @@ router.post('/', async (req, res) => {
       action_type: 'scan',
       description: `Scanned part ${partNo} (SN: ${partSlNo || 'N/A'}) against plan #${plan.id}`
     });
+
+    // Asynchronous non-blocking email notification to subscribed users (queued in background)
+    notifyScan({
+      part_number: partNo,
+      serial_number: partSlNo,
+      vendor_code: vendorCode || plan.vendor_code,
+      customer_name: plan.customer_name,
+      scanned_label: raw_scan_text,
+      scanner_name: req.user.name,
+      scanner_username: req.user.username,
+      plan_id: plan.id,
+      balance_quantity: newBalance,
+      plan_quantity: plan.quantity
+    }).catch((err) => console.error('[ScanMail] Background notification error:', err?.message || err));
 
     res.json({ message: 'Scan successful', parsed, plan_id: plan.id, raw_scan_text, scanned_label: raw_scan_text, status: 'success' });
   } catch (error) {

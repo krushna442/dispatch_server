@@ -3,6 +3,9 @@ import { query, execute, getConnection } from '../config/db.js';
 import { protectRoute } from '../middleware/auth.js';
 import { emitToAll } from '../utils/socket.js';
 import { sendMail } from '../utils/mailer.js';
+import { enqueueMail } from '../utils/mailQueue.js';
+import { getSubscribedRecipients } from '../services/mailService.js';
+import { formatSubject, getCustomerInfo } from '../utils/customerConfig.js';
 import XLSX from 'xlsx-js-style';
 
 const router = express.Router();
@@ -68,10 +71,10 @@ router.post('/', async (req, res) => {
 
     // Send email with attached Excel file containing Scanned Labels & Gate Pass Summary
     try {
-      const emailUsers = await query(
-        "SELECT email FROM users WHERE receive_despatch_mail = 1 AND is_active = 1 AND email IS NOT NULL AND TRIM(email) != ''"
-      );
-      const recipientEmails = emailUsers.map(u => u.email.trim()).filter(Boolean);
+      const targetCustomer = plans[0]?.customer_name || null;
+      const targetVendor = plans[0]?.vendor_code || null;
+
+      const recipientEmails = await getSubscribedRecipients('gate_pass', targetCustomer, targetVendor);
 
       if (recipientEmails.length > 0) {
         // Query all scan logs associated with this gate pass
@@ -406,9 +409,11 @@ router.post('/', async (req, res) => {
           </div>
         `;
 
-        sendMail({
+        const subject = formatSubject(`Gate Pass Generated: #${gate_pass_number}`, targetCustomer, targetVendor);
+
+        enqueueMail({
           to: recipientEmails,
-          subject: `Gate Pass Generated - #${gate_pass_number} - RSB Despatch`,
+          subject,
           html: emailHtml,
           attachments: [
             {
@@ -417,8 +422,6 @@ router.post('/', async (req, res) => {
               contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             }
           ]
-        }).catch(mailErr => {
-          console.error('[GatePass] Error sending notification email with attachment:', mailErr?.message || mailErr);
         });
       }
     } catch (emailErr) {

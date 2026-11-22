@@ -10,7 +10,18 @@ router.use(adminOnly);
 
 router.get('/', async (req, res) => {
   try {
-    const users = await query('SELECT id, name, username, password, email, role, vendor_code, customer_name, receive_despatch_mail, is_active, created_at FROM users');
+    const users = await query(`
+      SELECT 
+        id, name, username, password, email, role, vendor_code, customer_name, 
+        receive_despatch_mail,
+        COALESCE(mail_each_scan, 0) as mail_each_scan,
+        COALESCE(mail_plan_add, 0) as mail_plan_add,
+        COALESCE(mail_gate_pass, 1) as mail_gate_pass,
+        COALESCE(mail_daily_report, 0) as mail_daily_report,
+        COALESCE(mail_monthly_report, 0) as mail_monthly_report,
+        is_active, created_at 
+      FROM users
+    `);
     res.json(users);
   } catch (error) {
     console.error('Error fetching users:', error);
@@ -20,7 +31,10 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { name, username, password, email, role, vendor_code, customer_name, receive_despatch_mail } = req.body;
+    const { 
+      name, username, password, email, role, vendor_code, customer_name, receive_despatch_mail,
+      mail_each_scan, mail_plan_add, mail_gate_pass, mail_daily_report, mail_monthly_report 
+    } = req.body;
     
     if (!username || !password || !name) {
       return res.status(400).json({ message: 'Please provide name, username and password' });
@@ -30,8 +44,19 @@ router.post('/', async (req, res) => {
     const userRole = validRoles.includes(role) ? role : 'operator';
 
     const result = await execute(
-      'INSERT INTO users (name, username, password, email, role, vendor_code, customer_name, receive_despatch_mail) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [name, username, password, email || null, userRole, vendor_code || null, customer_name || null, receive_despatch_mail ? 1 : 0]
+      `INSERT INTO users 
+       (name, username, password, email, role, vendor_code, customer_name, receive_despatch_mail,
+        mail_each_scan, mail_plan_add, mail_gate_pass, mail_daily_report, mail_monthly_report) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        name, username, password, email || null, userRole, vendor_code || null, customer_name || null,
+        receive_despatch_mail ? 1 : 0,
+        mail_each_scan ? 1 : 0,
+        mail_plan_add ? 1 : 0,
+        mail_gate_pass !== undefined ? (mail_gate_pass ? 1 : 0) : 1,
+        mail_daily_report ? 1 : 0,
+        mail_monthly_report ? 1 : 0
+      ]
     );
 
     await logActivity(req, {
@@ -52,13 +77,44 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
-    const { name, email, role, vendor_code, customer_name, is_active, password, receive_despatch_mail } = req.body;
+    const { 
+      name, email, role, vendor_code, customer_name, is_active, password, receive_despatch_mail,
+      mail_each_scan, mail_plan_add, mail_gate_pass, mail_daily_report, mail_monthly_report 
+    } = req.body;
     
     const validRoles = ['admin', 'sales', 'operator'];
     const userRole = validRoles.includes(role) ? role : 'operator';
 
-    let sql = 'UPDATE users SET name = ?, email = ?, role = ?, vendor_code = ?, customer_name = ?, is_active = ?, receive_despatch_mail = ?';
-    let params = [name, email || null, userRole, vendor_code || null, customer_name || null, is_active ? 1 : 0, receive_despatch_mail ? 1 : 0];
+    let sql = `
+      UPDATE users SET 
+        name = ?, email = ?, role = ?, vendor_code = ?, customer_name = ?, 
+        is_active = ?, receive_despatch_mail = ?
+    `;
+    let params = [
+      name, email || null, userRole, vendor_code || null, customer_name || null, 
+      is_active ? 1 : 0, receive_despatch_mail ? 1 : 0
+    ];
+
+    if (mail_each_scan !== undefined) {
+      sql += ', mail_each_scan = ?';
+      params.push(mail_each_scan ? 1 : 0);
+    }
+    if (mail_plan_add !== undefined) {
+      sql += ', mail_plan_add = ?';
+      params.push(mail_plan_add ? 1 : 0);
+    }
+    if (mail_gate_pass !== undefined) {
+      sql += ', mail_gate_pass = ?';
+      params.push(mail_gate_pass ? 1 : 0);
+    }
+    if (mail_daily_report !== undefined) {
+      sql += ', mail_daily_report = ?';
+      params.push(mail_daily_report ? 1 : 0);
+    }
+    if (mail_monthly_report !== undefined) {
+      sql += ', mail_monthly_report = ?';
+      params.push(mail_monthly_report ? 1 : 0);
+    }
     
     if (password) {
       sql += ', password = ?';

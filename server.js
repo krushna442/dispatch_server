@@ -15,6 +15,8 @@ import scanRoutes from './routes/scanRoutes.js';
 import gatepassRoutes from './routes/gatepassRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
 import backupRoutes from './routes/backupRoutes.js';
+import mailRoutes from './routes/mailRoutes.js';
+import { initReportScheduler } from './services/reportScheduler.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -75,6 +77,7 @@ app.use('/api/scan', scanRoutes);
 app.use('/api/gatepass', gatepassRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/backup', backupRoutes);
+app.use('/api/mail', mailRoutes);
 
 app.use(express.static(path.join(__dirname, "/dist")));
 
@@ -319,6 +322,22 @@ async function bootstrap() {
       )
     `);
 
+    // Add mail subscription columns to users table
+    try { await execute('ALTER TABLE users ADD COLUMN mail_each_scan BOOLEAN DEFAULT FALSE'); } catch (err) {}
+    try { await execute('ALTER TABLE users ADD COLUMN mail_plan_add BOOLEAN DEFAULT FALSE'); } catch (err) {}
+    try { await execute('ALTER TABLE users ADD COLUMN mail_gate_pass BOOLEAN DEFAULT TRUE'); } catch (err) {}
+    try { await execute('ALTER TABLE users ADD COLUMN mail_daily_report BOOLEAN DEFAULT FALSE'); } catch (err) {}
+    try { await execute('ALTER TABLE users ADD COLUMN mail_monthly_report BOOLEAN DEFAULT FALSE'); } catch (err) {}
+    try { await execute('UPDATE users SET mail_gate_pass = 1 WHERE receive_despatch_mail = 1'); } catch (err) {}
+
+    // Unify legacy MBP to ASL PNR MBP (Vendor 7201012 - Ashok Leyland Pantnagar)
+    try {
+      await execute("UPDATE despatch_plans SET customer_name = 'ASL PNR MBP', vendor_code = '7201012' WHERE customer_name IN ('MBP', 'MBP (7201012)', 'MBP (R64535)')");
+      await execute("UPDATE users SET customer_name = 'ASL PNR MBP', vendor_code = '7201012' WHERE customer_name IN ('MBP', 'MBP (7201012)')");
+    } catch (err) {
+      console.log('Customer name unification notice:', err.message);
+    }
+
     // Insert admin if not exists
     await execute(`
       INSERT IGNORE INTO users (name, username, password, role) 
@@ -330,6 +349,7 @@ async function bootstrap() {
     const PORT = process.env.PORT || 5555;
     httpServer.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
+      initReportScheduler();
     });
 
   } catch (error) {
